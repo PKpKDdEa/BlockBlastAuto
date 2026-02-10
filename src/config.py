@@ -54,10 +54,24 @@ class Config:
             self.TRAY_SLOT_CENTERS = [(130, 950), (310, 950), (492, 950)]
             
         if self.PIECE_SLOTS is None:
-            # Calibrated piece slots (Widened to 250px to avoid clipping)
+            # Calibrated piece slots (Strict 5.0x bounds to avoid horizontal overlap)
             self.PIECE_SLOTS = []
+            
+            # Calculate min distance between centers for overlap prevention
+            min_dist = 999
+            if len(self.TRAY_SLOT_CENTERS) >= 2:
+                for i in range(len(self.TRAY_SLOT_CENTERS) - 1):
+                    dist = abs(self.TRAY_SLOT_CENTERS[i+1][0] - self.TRAY_SLOT_CENTERS[i][0])
+                    min_dist = min(min_dist, dist)
+            
             for (cx, cy) in self.TRAY_SLOT_CENTERS:
-                w, h = int(self.TRAY_CELL_SIZE[0] * 5.5), int(self.TRAY_CELL_SIZE[1] * 5.5)
+                # Use 5.0x multiplier, but cap at the distance between slots - 2px buffer
+                max_w = int(self.TRAY_CELL_SIZE[0] * 5.0)
+                if min_dist < max_w:
+                    max_w = min_dist - 2
+                
+                w = max_w
+                h = int(self.TRAY_CELL_SIZE[1] * 5.0) # Vertical overlap is less common but kept tight
                 self.PIECE_SLOTS.append(GameRegion(x=cx - w//2, y=cy - h//2, width=w, height=h))
     
     # Mouse control

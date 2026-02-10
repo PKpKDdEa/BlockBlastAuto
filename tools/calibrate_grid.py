@@ -120,9 +120,23 @@ class CalibrationTool:
         print(f"TRAY_CELL_SIZE = ({tray_cell_w}, {tray_cell_h})")
         print()
         
-        # Calculate piece slot regions (w/h for visualization, but centers for sampling)
-        slot_width = int(tray_cell_w * 5.5)  # Buffer for 5x5
-        slot_height = int(tray_cell_h * 5.5)
+        # Calculate piece slot regions (Strict 5x5 bounds to avoid overlap)
+        # 1. Base dimensions from single tray cell
+        base_w = int(tray_cell_w * 5.0)
+        base_h = int(tray_cell_h * 5.0)
+        
+        # 2. Prevent horizontal overlap based on distance between centers
+        min_dist = 999
+        for i in range(len(piece_slots) - 1):
+            dist = abs(piece_slots[i+1][0] - piece_slots[i][0])
+            min_dist = min(min_dist, dist)
+            
+        slot_width = base_w
+        if min_dist < base_w:
+            slot_width = min_dist - 2 # 2px gap
+            print(f"! Warning: Slot width capped to {slot_width} to prevent overlap (min distance between slots: {min_dist})")
+
+        slot_height = base_h
         
         print("TRAY_SLOT_CENTERS = [")
         for x, y in piece_slots:
