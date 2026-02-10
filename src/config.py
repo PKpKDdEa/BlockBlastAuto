@@ -65,14 +65,13 @@ class Config:
                     min_dist = min(min_dist, dist)
             
             for (cx, cy) in self.TRAY_SLOT_CENTERS:
+                # Enforce SQUARE slots: height = width
                 # Use 5.0x multiplier, but cap at the distance between slots - 2px buffer
-                max_w = int(self.TRAY_CELL_SIZE[0] * 5.0)
-                if min_dist < max_w:
-                    max_w = min_dist - 2
+                size = int(self.TRAY_CELL_SIZE[0] * 5.0)
+                if min_dist < size:
+                    size = min_dist - 2
                 
-                w = max_w
-                h = int(self.TRAY_CELL_SIZE[1] * 5.0) # Vertical overlap is less common but kept tight
-                self.PIECE_SLOTS.append(GameRegion(x=cx - w//2, y=cy - h//2, width=w, height=h))
+                self.PIECE_SLOTS.append(GameRegion(x=cx - size//2, y=cy - size//2, width=size, height=size))
     
     # Mouse control
     MOUSE_DRAG_DURATION_MS: int = 300  # Duration of drag in milliseconds

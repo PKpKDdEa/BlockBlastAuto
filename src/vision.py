@@ -447,29 +447,33 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         cx_rel, cy_rel = sw // 2, sh // 2
         cw, ch = config.TRAY_CELL_SIZE
         
+        # CENTROID DETECTION (Sync Viz with Logic)
+        centroid = find_piece_centroid(mask)
+        if centroid:
+            cx_rel, cy_rel = centroid
+            # Draw the centroid dot
+            cv2.circle(vis, (slot.x + int(cx_rel), slot.y + int(cy_rel)), 4, (255, 100, 0), -1)
+        
         # Draw the 5x5 fixed sampling grid for verification
         for r in range(5):
             for c in range(5):
-                px = slot.x + cx_rel + (c - 2) * cw
-                py = slot.y + cy_rel + (r - 2) * ch
+                px = int(slot.x + cx_rel + (c - 2) * cw)
+                py = int(slot.y + cy_rel + (r - 2) * ch)
                 
                 # Highlight the calculated center of this cell
                 cv2.circle(vis, (px, py), 2, (70, 70, 70), -1)
-                
-                # Draw the centroid as a blue dot for feedback
-                centroid = find_piece_centroid(mask)
-                if centroid:
-                    vcx, vcy = int(slot.x + centroid[0]), int(slot.y + centroid[1])
-                    cv2.circle(vis, (vcx, vcy), 4, (255, 100, 0), -1)
 
                 # Draw sampling boxes (Zero Spacing continuous grid)
                 box_w, box_h = cw // 2, ch // 2
                 cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (80, 80, 80), 1)
                 
                 # Check if this cell is filled in the detect grid
-                # (Re-run raw detection for this specific cell for visual sync)
-                patch = mask[max(0, cy_rel + (r-2)*ch - 2):min(sh, cy_rel + (r-2)*ch + 3), 
-                             max(0, cx_rel + (c-2)*cw - 2):min(sw, cx_rel + (c-2)*cw + 3)]
+                # Use EXACT same logic as get_piece_grid for visual sync
+                patch_x, patch_y = cx_rel + (c-2)*cw, cy_rel + (r-2)*ch
+                margin_x, margin_y = cw // 2, ch // 2
+                patch = mask[max(0, int(patch_y-margin_y)):min(sh, int(patch_y+margin_y+1)), 
+                             max(0, int(patch_x-margin_x)):min(sw, int(patch_x+margin_x+1))]
+                             
                 if patch.size > 0 and np.mean(patch) > 100:
                     cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (0, 255, 0), 1)
                     cv2.circle(vis, (px, py), 3, (0, 0, 255), -1)
