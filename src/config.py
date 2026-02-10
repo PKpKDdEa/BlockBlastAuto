@@ -70,9 +70,9 @@ class Config:
     DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
     
-    # Vision Throttles
-    VISION_SAT_THRESHOLD: int = 140
-    VISION_VAL_THRESHOLD: int = 150
+    # Vision Throttles (Aggressive Sensitivity)
+    VISION_SAT_THRESHOLD: int = 100
+    VISION_VAL_THRESHOLD: int = 100
     # Exclude Tray Blue-Gray Only if Saturation is low
     VISION_EXCLUDE_HUE_MIN: int = 80
     VISION_EXCLUDE_HUE_MAX: int = 150

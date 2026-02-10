@@ -131,7 +131,8 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     
     # Stage 1: Absolute Vibrancy (Catches any very bright/vibrant block, even Blue/Cyan)
     # Background tray is usually saturation < 150. Pieces are high.
-    lower_vibrant = np.array([0, 200, 150])
+    # Lowered slightly to 180 to be more inclusive.
+    lower_vibrant = np.array([0, 180, 150])
     upper_vibrant = np.array([180, 255, 255])
     mask_vibrant = cv2.inRange(hsv, lower_vibrant, upper_vibrant)
     
@@ -217,7 +218,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 avg_v = np.mean(hsv_patch[:, :, 2])
                 
                 is_filled = False
-                if avg_s > 200 and avg_v > 150: # Absolute vibrancy pass
+                if avg_s > 180 and avg_v > 150: # Absolute vibrancy pass (Stage 1)
                     is_filled = True
                 elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
                      (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
@@ -349,7 +350,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
         
         # Two-stage mask for visualization
-        lower_vibrant = np.array([0, 200, 150])
+        lower_vibrant = np.array([0, 180, 150])
         upper_vibrant = np.array([180, 255, 255])
         mask_vibrant = cv2.inRange(hsv, lower_vibrant, upper_vibrant)
         mask_r1 = cv2.inRange(hsv, np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD]), 
@@ -424,22 +425,22 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
     return vis
 
 
-def visualize_drag(frame: np.ndarray, move: Move, start_pos: Tuple[int, int], end_pos: Tuple[int, int]) -> np.ndarray:
+def visualize_drag(frame: np.ndarray, move: Move, start_pos: Tuple[int, int], click_pos: Tuple[int, int], expected_pos: Tuple[int, int]) -> np.ndarray:
     """
-    Visualize the drag move with red dots for start/end.
+    Visualize the drag move with:
+    - Red Cross: Actual cursor destination (click_pos, with offset)
+    - Yellow Cross: Intended piece/board center (expected_pos)
     """
     vis = frame.copy()
-    # Draw Piece Start (Red Circle)
-    cv2.circle(vis, start_pos, 10, (0, 0, 255), -1)
-    # Draw Piece Actual Target Board Center (Yellow Circle)
-    # Note: Move doesn't store target screen pos directly, we recalculated it
-    # But for visualization, let's just use the end_pos (the one with offset)
-    cv2.circle(vis, end_pos, 20, (0, 0, 255), 3) # Big Red Circle (where mouse goes)
     
-    # Draw an X at the theoretical center of the cell (no offset)
-    # This helps see the distance of the offset
-    target_no_offset = (end_pos[0], end_pos[1] - config.DRAG_OFFSET_Y_BOTTOM) # Approximate
-    cv2.drawMarker(vis, target_no_offset, (0, 255, 255), cv2.MARKER_CROSS, 20, 2)
+    # 1. ACTUAL CURSOR DESTINATION (RED CROSS)
+    cv2.drawMarker(vis, click_pos, (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
+    
+    # 2. EXPECTED BOARD DESTINATION (YELLOW CROSS)
+    cv2.drawMarker(vis, expected_pos, (0, 255, 255), cv2.MARKER_CROSS, 20, 2)
+    
+    # Optional: Draw a line between them to show the offset distance
+    cv2.line(vis, expected_pos, click_pos, (200, 200, 200), 1)
     
     return vis
     
