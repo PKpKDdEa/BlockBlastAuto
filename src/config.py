@@ -31,8 +31,8 @@ class Config:
     GRID_COLS: int = 8
     
     # Grid boundaries (screen coordinates, to be calibrated)
-    GRID_TOP_LEFT: Tuple[int, int] = (100, 400)  # (x, y)
-    GRID_BOTTOM_RIGHT: Tuple[int, int] = (980, 1280)  # (x, y)
+    GRID_TOP_LEFT: Tuple[int, int] = (34, 228)  # (x, y)
+    GRID_BOTTOM_RIGHT: Tuple[int, int] = (587, 781)  # (x, y)
     
     # Computed cell dimensions
     @property
@@ -49,16 +49,11 @@ class Config:
     
     def __post_init__(self):
         if self.PIECE_SLOTS is None:
-            # Default piece slots for 1080x1920
-            slot_y = 1400
-            slot_width = 200
-            slot_height = 200
-            spacing = 100
-            
+            # Calibrated piece slots
             self.PIECE_SLOTS = [
-                GameRegion(x=140, y=slot_y, width=slot_width, height=slot_height),
-                GameRegion(x=440, y=slot_y, width=slot_width, height=slot_height),
-                GameRegion(x=740, y=slot_y, width=slot_width, height=slot_height),
+                GameRegion(x=30, y=842, width=200, height=200),
+                GameRegion(x=210, y=840, width=200, height=200),
+                GameRegion(x=392, y=843, width=200, height=200),
             ]
     
     # Mouse control

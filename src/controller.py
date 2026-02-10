@@ -16,16 +16,14 @@ pyautogui.FAILSAFE = True  # Move mouse to corner to abort
 def cell_center(row: int, col: int) -> Tuple[int, int]:
     """
     Convert grid coordinates to screen coordinates (cell center).
-    
-    Args:
-        row: Grid row (0-7)
-        col: Grid column (0-7)
-    
-    Returns:
-        Tuple of (x, y) screen coordinates
     """
-    x = config.GRID_TOP_LEFT[0] + col * config.CELL_WIDTH + config.CELL_WIDTH // 2
-    y = config.GRID_TOP_LEFT[1] + row * config.CELL_HEIGHT + config.CELL_HEIGHT // 2
+    grid_width = config.GRID_BOTTOM_RIGHT[0] - config.GRID_TOP_LEFT[0]
+    grid_height = config.GRID_BOTTOM_RIGHT[1] - config.GRID_TOP_LEFT[1]
+    cell_w = grid_width / config.GRID_COLS
+    cell_h = grid_height / config.GRID_ROWS
+    
+    x = int(config.GRID_TOP_LEFT[0] + (col + 0.5) * cell_w)
+    y = int(config.GRID_TOP_LEFT[1] + (row + 0.5) * cell_h)
     
     # Add small randomness if configured
     if config.MOUSE_MOVE_RANDOMNESS > 0:

@@ -1,8 +1,8 @@
-GRID_TOP_LEFT = (35, 229)
-GRID_BOTTOM_RIGHT = (587, 783)
+GRID_TOP_LEFT = (34, 228)
+GRID_BOTTOM_RIGHT = (587, 781)
 
 PIECE_SLOTS = [
-    GameRegion(x=29, y=844, width=200, height=200),
-    GameRegion(x=211, y=843, width=200, height=200),
-    GameRegion(x=391, y=841, width=200, height=200),
+    GameRegion(x=30, y=842, width=200, height=200),
+    GameRegion(x=210, y=840, width=200, height=200),
+    GameRegion(x=392, y=843, width=200, height=200),
 ]
