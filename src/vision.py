@@ -138,12 +138,16 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     hsv_subset = hsv[inset:-inset, inset:-inset]
     
     # Create mask for colored regions (piece cells)
-    # Block Blast pieces have very vibrant colors.
-    # We increase thresholds to ignore the gray/dark background.
-    lower_bound = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])  
-    upper_bound = np.array([180, 255, 255])
+    # We use two ranges to EXCLUDE the tray blue (approx 100-135)
+    lower1 = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
     
-    mask_small = cv2.inRange(hsv_subset, lower_bound, upper_bound)
+    lower2 = np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper2 = np.array([180, 255, 255])
+    
+    mask1 = cv2.inRange(hsv_subset, lower1, upper1)
+    mask2 = cv2.inRange(hsv_subset, lower2, upper2)
+    mask_small = cv2.bitwise_or(mask1, mask2)
     
     # Reconstruct full-size mask with black border
     mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
@@ -309,9 +313,24 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
     return vis
 
 
-if __name__ == "__main__":
-    # Test vision module
-    from window_capture import WindowCapture
+def visualize_drag(frame: np.ndarray, move: Move, start_pos: Tuple[int, int], end_pos: Tuple[int, int]) -> np.ndarray:
+    """
+    Visualize the drag move with red dots for start/end.
+    """
+    vis = frame.copy()
+    # Draw Piece Start (Red Circle)
+    cv2.circle(vis, start_pos, 10, (0, 0, 255), -1)
+    # Draw Piece Actual Target Board Center (Yellow Circle)
+    # Note: Move doesn't store target screen pos directly, we recalculated it
+    # But for visualization, let's just use the end_pos (the one with offset)
+    cv2.circle(vis, end_pos, 20, (0, 0, 255), 3) # Big Red Circle (where mouse goes)
+    
+    # Draw an X at the theoretical center of the cell (no offset)
+    # This helps see the distance of the offset
+    target_no_offset = (end_pos[0], end_pos[1] - config.DRAG_OFFSET_Y_BOTTOM) # Approximate
+    cv2.drawMarker(vis, target_no_offset, (0, 255, 255), cv2.MARKER_CROSS, 20, 2)
+    
+    return vis
     
     print("Testing vision module...")
     print("Make sure LDPlayer with Block Blast is running!")

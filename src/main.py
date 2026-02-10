@@ -92,6 +92,22 @@ def main():
             # 3. Execute Move
             piece = pieces[move.piece_index]
             print(f"Move #{move_count + 1}: Placing {piece.width}x{piece.height} at ({move.row}, {move.col}) [Streak: {board.combo_streak}]")
+            
+            if config.DEBUG:
+                from controller import piece_slot_center, cell_center
+                from vision import visualize_drag
+                start_xy = piece_slot_center(move.piece_index)
+                end_xy = cell_center(move.row, move.col)
+                # Apply the same logic as controller.py for visualization
+                y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
+                progress = max(0, min(1, (y_bottom - end_xy[1]) / (y_bottom - y_top)))
+                current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
+                click_xy = (end_xy[0], end_xy[1] + current_offset)
+                
+                vis_drag = visualize_drag(frame, move, start_xy, click_xy)
+                cv2.imshow("Bot Vision", vis_drag)
+                cv2.waitKey(500) # Show target for 500ms
+                
             drag_piece(move.piece_index, move.row, move.col)
             
             move_count += 1

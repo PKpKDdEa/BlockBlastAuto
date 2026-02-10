@@ -92,12 +92,24 @@ def drag_piece(piece_index: int, target_row: int, target_col: int) -> None:
     start_pos = piece_slot_center(piece_index)
     end_pos = cell_center(target_row, target_col)
     
-    # Apply vertical offset for LDPlayer piece interaction
-    # (The piece is held above the physical cursor)
-    end_pos_offset = (end_pos[0], end_pos[1] + config.DRAG_OFFSET_Y)
+    # Calculate scaling vertical offset
+    # offset increases as target_y moves UP (smaller Y)
+    y_top = config.GRID_TOP_LEFT[1]
+    y_bottom = config.GRID_BOTTOM_RIGHT[1]
+    
+    # Linear interpolation: T=1.0 at top, T=0.0 at bottom slot
+    # but let's just use the current Y relative to the grid
+    target_y = end_pos[1]
+    progress = (y_bottom - target_y) / (y_bottom - y_top)
+    progress = max(0, min(1, progress)) # Clamp 0-1
+    
+    current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
+    
+    end_pos_offset = (end_pos[0], end_pos[1] + current_offset)
     
     if config.DEBUG:
-        print(f"Dragging piece {piece_index} from {start_pos} to {end_pos_offset} (original target: {end_pos})")
+        print(f"Dragging piece {piece_index} from {start_pos} to {end_pos_offset}")
+        print(f"  Target: {end_pos}, Progress: {progress:.2f}, Offset: {current_offset}")
     
     move_mouse_and_drag(start_pos, end_pos_offset)
 

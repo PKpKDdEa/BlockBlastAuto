@@ -65,13 +65,17 @@ class Config:
     FILLED_CELL_COLOR_HSV_UPPER: Tuple[int, int, int] = (180, 255, 255)
     
     # Drag Offsets (Phase 5 fix)
-    # The piece is held ABOVE the cursor, so we need to move the cursor LOWER
-    # to place the piece at the target cells.
-    DRAG_OFFSET_Y: int = 150  # Pixels to shift the drag destination downwards
+    # The piece is held ABOVE the cursor.
+    # User reports offset increases as the piece moves UP the screen.
+    DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
+    DRAG_OFFSET_Y_TOP: int = 250     # Offset at the top of the board
     
     # Vision Throttles
-    VISION_SAT_THRESHOLD: int = 150
-    VISION_VAL_THRESHOLD: int = 150
+    VISION_SAT_THRESHOLD: int = 140
+    VISION_VAL_THRESHOLD: int = 140
+    # Exclude Tray Blue (Hue 100-130)
+    VISION_EXCLUDE_HUE_MIN: int = 100
+    VISION_EXCLUDE_HUE_MAX: int = 135
     
     # Debug
     DEBUG: bool = True
