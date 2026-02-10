@@ -133,13 +133,27 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Convert to HSV
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     
+    # Inset the region slightly to avoid capturing slot borders
+    inset = 10
+    hsv_subset = hsv[inset:-inset, inset:-inset]
+    
     # Create mask for colored regions (piece cells)
-    # Block Blast pieces have vibrant colors (High Saturation/Value)
-    # We use a broad HSV range to capture all colors except the background.
-    lower_bound = np.array([0, 50, 50])  
+    # Block Blast pieces have very vibrant colors.
+    # We increase thresholds to ignore the gray/dark background.
+    lower_bound = np.array([0, 100, 100])  
     upper_bound = np.array([180, 255, 255])
     
-    mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    mask_small = cv2.inRange(hsv_subset, lower_bound, upper_bound)
+    
+    # Reconstruct full-size mask with black border
+    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    mask[inset:-inset, inset:-inset] = mask_small
+    
+    if config.SAVE_DEBUG_FRAMES:
+        import os
+        os.makedirs("debug", exist_ok=True)
+        cv2.imwrite(f"debug/piece_region_{int(time.time()*1000)}.png", piece_region)
+        cv2.imwrite(f"debug/mask_{int(time.time()*1000)}.png", mask)
     
     # Morphological clean up
     kernel = np.ones((3, 3), np.uint8)
