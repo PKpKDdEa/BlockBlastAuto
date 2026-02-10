@@ -43,11 +43,12 @@ def main():
     move_count = 0
     
     print("\nStarting automation loop...")
-    print(f"Controls: Press [{config.HOTKEY_PAUSE.upper()}] to Pause/Resume the bot.")
+    print(f"Controls: Press [{config.HOTKEY_PAUSE.upper()}] to Pause/Resume, [{config.HOTKEY_AUTO_TOGGLE.upper()}] to toggle Auto-Play.")
     
     # Global state for controls
     state = {
         "paused": False,
+        "auto_play": config.AUTO_PLAY,
         "pieces_last_seen": None,
         "diag_frame": None
     }
@@ -55,9 +56,15 @@ def main():
     def on_toggle_pause():
         state["paused"] = not state["paused"]
         status = "PAUSED" if state["paused"] else "RESUMED"
-        print(f"\n[BOT {status}] - Interactive control is now {'disabled' if state['paused'] else 'enabled'}")
+        print(f"\n[BOT {status}] - Controls suspended.")
+        
+    def on_toggle_auto():
+        state["auto_play"] = not state["auto_play"]
+        status = "AUTO-PLAY" if state["auto_play"] else "OBSERVATION-ONLY"
+        print(f"\n[MODE: {status}] - Bot will {'now drag pieces' if state['auto_play'] else 'only observe'}.")
     
     keyboard.add_hotkey(config.HOTKEY_PAUSE, on_toggle_pause)
+    keyboard.add_hotkey(config.HOTKEY_AUTO_TOGGLE, on_toggle_auto)
     
     try:
         while True:
@@ -75,6 +82,10 @@ def main():
             # Show Live Vision (Always active)
             vis = visualize_detection(frame, board, pieces)
             draw_pause_status(vis, state["paused"])
+            # Indicate current mode
+            mode_text = "AUTO-PLAY" if state["auto_play"] else "OBSERVING ONLY"
+            mode_color = (0, 255, 0) if state["auto_play"] else (0, 165, 255)
+            cv2.putText(vis, mode_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, mode_color, 2)
             cv2.imshow("Bot Vision", vis)
             
             # Show Stable Piece Analysis (Update only on turn change)
@@ -102,7 +113,20 @@ def main():
             # 2. Solve Best Move (Sequence optimized)
             if config.DEBUG:
                 print("\nBoard State:")
-                print(board)
+            if not state["auto_play"]:
+                # In observation mode, we still show the best move for feedback
+                move = best_move(board, pieces)
+                if move is not None:
+                    piece = pieces[move.piece_index]
+                    from controller import cell_center
+                    end_xy = cell_center(move.row, move.col)
+                    # Show intended move with a small dot
+                    cv2.circle(vis, end_xy, 10, (255, 255, 0), 2)
+                    cv2.imshow("Bot Vision", vis)
+                time.sleep(0.1)
+                continue
+                
+            # 3. Solve & Execute (Auto-Play ONLY)
             move = best_move(board, pieces)
             
             if move is None:

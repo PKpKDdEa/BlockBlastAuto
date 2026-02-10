@@ -81,6 +81,8 @@ class Config:
     DEBUG: bool = True
     SAVE_DEBUG_FRAMES: bool = False
     HOTKEY_PAUSE: str = "f10"
+    HOTKEY_AUTO_TOGGLE: str = "f11"
+    AUTO_PLAY: bool = False # Start in observation mode by default
     
     # Heuristic Weights (Phase 3 improvements)
     WEIGHT_EMPTY_CELLS: float = 2.0
