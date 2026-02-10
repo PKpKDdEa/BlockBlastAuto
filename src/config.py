@@ -31,8 +31,8 @@ class Config:
     GRID_COLS: int = 8
     
     # Grid boundaries (screen coordinates, to be calibrated)
-    GRID_TOP_LEFT: Tuple[int, int] = (34, 228)  # (x, y)
-    GRID_BOTTOM_RIGHT: Tuple[int, int] = (587, 781)  # (x, y)
+    GRID_TOP_LEFT: Tuple[int, int] = (35, 229)  # (x, y)
+    GRID_BOTTOM_RIGHT: Tuple[int, int] = (586, 780)  # (x, y)
     
     # Computed cell dimensions
     @property
@@ -44,14 +44,14 @@ class Config:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) // self.GRID_ROWS
     
     # Tray configuration (Sampling pieces at bottom)
-    TRAY_CELL_SIZE: Tuple[int, int] = (45, 45)  # Calibrated size of a single block in the tray
+    TRAY_CELL_SIZE: Tuple[int, int] = (30, 30)  # Calibrated size of a single block in the tray
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     PIECE_SLOTS: List[GameRegion] = None
     
     def __post_init__(self):
         if self.TRAY_SLOT_CENTERS is None:
             # Default centers for 1080x1920
-            self.TRAY_SLOT_CENTERS = [(130, 950), (310, 950), (492, 950)]
+            self.TRAY_SLOT_CENTERS = [(113, 942), (309, 941), (490, 942)]
             
         if self.PIECE_SLOTS is None:
             # Calibrated piece slots (Strict 5.0x bounds to avoid horizontal overlap)
