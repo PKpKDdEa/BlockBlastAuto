@@ -134,11 +134,16 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     
     # Create mask for colored regions (piece cells)
-    # Adjust these thresholds based on actual piece appearance
-    lower_bound = np.array([0, 30, 80])  # Low saturation/brightness = background
+    # Block Blast pieces have vibrant colors (High Saturation/Value)
+    # We use a broad HSV range to capture all colors except the background.
+    lower_bound = np.array([0, 50, 50])  
     upper_bound = np.array([180, 255, 255])
     
     mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    
+    # Clean up mask (remove noise, fill small holes)
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
     
     # Find bounding box and crop
     y_idx, x_idx = np.where(mask > 0)
@@ -157,11 +162,21 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     
     mask_cropped = mask[y_min:y_max+1, x_min:x_max+1]
     
-    # Resize to canonical small grid (e.g., 5x5)
-    # We want to maintain aspect ratio as much as possible, 
-    # but pieces like 1x5 or 5x1 need to fit.
-    canonical_size = 5
-    mask_resized = cv2.resize(mask_cropped, (canonical_size, canonical_size), interpolation=cv2.INTER_NEAREST)
+    # Estimate grid dimensions based on actual pixel size relative to slot size
+    # Assuming a 5x5 grid fits in the 200x200 slot, each cell is ~40px.
+    # We use the slot dimensions to be resolution-independent.
+    slot_w, slot_h = piece_region.shape[1], piece_region.shape[0]
+    cell_size = slot_w / 5.0
+    
+    cols = max(1, int(round(mask_cropped.shape[1] / cell_size)))
+    rows = max(1, int(round(mask_cropped.shape[0] / cell_size)))
+    
+    # Cap dimensions to common game limits (usually max 5x5)
+    cols = min(5, cols)
+    rows = min(5, rows)
+    
+    # Resize to the inferred grid dimensions
+    mask_resized = cv2.resize(mask_cropped, (cols, rows), interpolation=cv2.INTER_NEAREST)
     
     # Threshold to binary
     mask_binary = (mask_resized > 127).astype(np.uint8)
