@@ -6,6 +6,7 @@ import time
 import random
 from typing import Tuple
 from config import config
+from model import Piece
 
 
 # Configure pyautogui
