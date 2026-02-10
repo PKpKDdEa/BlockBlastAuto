@@ -18,21 +18,23 @@ class Piece:
     @classmethod
     def from_mask(cls, piece_id: int, mask: np.ndarray) -> 'Piece':
         """
-        Create piece from binary mask.
-        
-        Args:
-            piece_id: Unique identifier for this piece
-            mask: 2D binary array where 1 = filled cell
-        
-        Returns:
-            Piece instance
+        Create piece from binary mask. Automatically trims empty space
+        to keep piece offsets relative to its own top-left.
         """
-        cells = []
         rows, cols = np.where(mask == 1)
-        for r, c in zip(rows, cols):
-            cells.append((int(r), int(c)))
+        if len(rows) == 0:
+            return cls(id=piece_id, cells=[], width=0, height=0)
+            
+        min_r, max_r = np.min(rows), np.max(rows)
+        min_c, max_c = np.min(cols), np.max(cols)
         
-        height, width = mask.shape
+        cells = []
+        for r, c in zip(rows, cols):
+            cells.append((int(r - min_r), int(c - min_c)))
+            
+        height = int(max_r - min_r + 1)
+        width = int(max_c - min_c + 1)
+        
         return cls(id=piece_id, cells=cells, width=width, height=height)
     
     @property

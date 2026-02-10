@@ -190,51 +190,23 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     cols = max(1, min(5, cols))
     rows = max(1, min(5, rows))
     
-    # Now sample a grid WITHIN the bounding box (bx, by, bw, bh)
-    grid = np.zeros((rows, cols), dtype=np.uint8)
+    # Create a standardized 5x5 grid and center the detected piece within it
+    grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
-    sub_w = bw / float(cols)
-    sub_h = bh / float(rows)
+    # Calculate start positions to center the (rows x cols) piece in (5 x 5)
+    # This follows standard Block Blast centering (Width 1=index 2, Width 2=index 1)
+    start_row = (5 - rows) // 2
+    start_col = (5 - cols) // 2
     
-    for r in range(rows):
-        for c in range(cols):
-            # Calculate sub-cell boundaries relative to piece_region
-            y1 = by + int(r * sub_h)
-            y2 = by + int((r + 1) * sub_h)
-            x1 = bx + int(c * sub_w)
-            x2 = bx + int((c + 1) * sub_w)
-            
-            # Sample center patch of this sub-cell
-            margin_h = max(1, int((y2 - y1) * 0.2))
-            margin_w = max(1, int((x2 - x1) * 0.2))
-            patch = mask[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-            
-            if patch.size > 0:
-                # Use the same two-stage logic to decide if individual cell is filled
-                # (This mirrors the mask generation above for consistency)
-                hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-                avg_h = np.mean(hsv_patch[:, :, 0])
-                avg_s = np.mean(hsv_patch[:, :, 1])
-                avg_v = np.mean(hsv_patch[:, :, 2])
-                
-                is_filled = False
-                if avg_s > 180 and avg_v > 150: # Absolute vibrancy pass (Stage 1)
-                    is_filled = True
-                elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
-                     (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
-                    is_filled = True
-                
-                if is_filled:
-                    grid[r, c] = 1
-                elif config.DEBUG:
-                    print(f"    Block at ({r},{c}) failed: Hue={avg_h:.0f}, Sat={avg_s:.1f}, Val={avg_v:.1f}")
-                
+    # Slice the sampled piece into the 5x5 grid
+    grid_5x5[start_row : start_row + rows, start_col : start_col + cols] = grid
+    
     if config.DEBUG:
-        print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Inferred Grid: {rows}x{cols}")
-        for row in grid:
+        print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Grid Detected: {rows}x{cols} (Centered in 5x5)")
+        for row in grid_5x5:
             print("  " + "".join(["#" if x else "." for x in row]))
             
-    return grid
+    return grid_5x5
 
 
 def load_piece_templates() -> dict:
@@ -382,18 +354,28 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         cols = max(1, min(5, int(round(bw / unit_size))))
         rows = max(1, min(5, int(round(bh / unit_size))))
         
+        # Sub-cell dimensions
         sub_w = bw / float(cols)
         sub_h = bh / float(rows)
         
-        # Draw the relative grid
-        for r in range(rows + 1):
-            py = slot.y + by + int(r * sub_h)
-            cv2.line(vis, (slot.x + bx, py), (slot.x + bx + bw, py), (100, 100, 100), 1)
-        for c in range(cols + 1):
-            px = slot.x + bx + int(c * sub_w)
-            cv2.line(vis, (px, slot.y + by), (px, slot.y + by + bh), (100, 100, 100), 1)
+        # Center the 5x5 grid on the piece BBox
+        # This matches the detection centering
+        start_row = (5 - rows) // 2
+        start_col = (5 - cols) // 2
+        
+        # Draw the 5x5 background grid (Standardized)
+        for r in range(6): # 5 cells = 6 lines
+            # Adjust pixel Position to match the centered grid logic
+            # The piece top is 'by', but in 5x5 it's at 'start_row'
+            py = slot.y + by - (start_row * sub_h) + (r * sub_h)
+            cv2.line(vis, (int(slot.x + bx - start_col * sub_w), int(py)), 
+                          (int(slot.x + bx + (5 - start_col) * sub_w), int(py)), (80, 80, 80), 1)
+        for c in range(6):
+            px = slot.x + bx - (start_col * sub_w) + (c * sub_w)
+            cv2.line(vis, (int(px), int(slot.y + by - start_row * sub_h)), 
+                          (int(px), int(slot.y + by + (5 - start_row) * sub_h)), (80, 80, 80), 1)
             
-        # Highlight detected cells
+        # Highlight detected cells (Still relative to the piece)
         for r in range(rows):
             for c in range(cols):
                 y1 = by + int(r * sub_h)
@@ -401,6 +383,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                 x1 = bx + int(c * sub_w)
                 x2 = bx + int((c + 1) * sub_w)
                 margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
+                
                 hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
                 if hsv_patch.size > 0:
                     avg_h = np.mean(hsv_patch[:, :, 0])
@@ -408,7 +391,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                     avg_v = np.mean(hsv_patch[:, :, 2])
                     
                     is_filled = False
-                    if avg_s > 200 and avg_v > 150:
+                    if avg_s > 180 and avg_v > 150:
                         is_filled = True
                     elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
                          (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
@@ -418,7 +401,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                         cx = int(slot.x + bx + c * sub_w + sub_w // 2)
                         cy = int(slot.y + by + r * sub_h + sub_h // 2)
                         cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-                        # Highlight the sampling area
+                        # Highlight the sampling area (Green Box)
                         cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
                                       (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
     
