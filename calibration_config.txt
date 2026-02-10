@@ -1,15 +1,15 @@
-GRID_TOP_LEFT = (38, 230)
-GRID_BOTTOM_RIGHT = (587, 780)
-TRAY_CELL_SIZE = (30, 29)
+GRID_TOP_LEFT = (34, 229)
+GRID_BOTTOM_RIGHT = (587, 783)
+TRAY_CELL_SIZE = (33, 33)
 
 TRAY_SLOT_CENTERS = [
-    (128, 940),
-    (309, 942),
-    (492, 940),
+    (114, 945),
+    (309, 943),
+    (491, 944),
 ]
 
 PIECE_SLOTS = [
-    GameRegion(x=53, y=868, width=150, height=145),
-    GameRegion(x=234, y=870, width=150, height=145),
-    GameRegion(x=417, y=868, width=150, height=145),
+    GameRegion(x=32, y=863, width=165, height=165),
+    GameRegion(x=227, y=861, width=165, height=165),
+    GameRegion(x=409, y=862, width=165, height=165),
 ]

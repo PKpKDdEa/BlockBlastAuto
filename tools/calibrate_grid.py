@@ -25,8 +25,8 @@ class CalibrationTool:
             "Click on center of FIRST piece slot (left)",
             "Click on center of SECOND piece slot (middle)",
             "Click on center of THIRD piece slot (right)",
-            "Click on TOP-LEFT corner of a SINGLE BLOCK in the tray",
-            "Click on BOTTOM-RIGHT corner of that SAME BLOCK",
+            "Step A: Click the exact CENTER of a block in the tray",
+            "Step B: Click the exact CENTER of the block NEXT to it",
         ]
     
     def mouse_callback(self, event, x, y, flags, param):
@@ -88,6 +88,61 @@ class CalibrationTool:
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
                 break
+                
+        # --- NEW: Live Preview Loop ---
+        if len(self.points) == len(self.steps):
+            print("\n" + "-" * 60)
+            print("ENTERING PREVIEW MODE")
+            print("Press 'S' to SAVE and generate config.")
+            print("Press 'R' to RESET Step A & B (points 6 & 7) and click again.")
+            print("-" * 60)
+            
+            while True:
+                preview = self.frame.copy()
+                
+                # Calculate pitch from current points 6 and 7
+                p6 = self.points[5]
+                p7 = self.points[6]
+                pitch = int(np.sqrt((p7[0]-p6[0])**2 + (p7[1]-p6[1])**2))
+                
+                # Draw the 5x5 grid preview for each slot
+                piece_slots = self.points[2:5]
+                for cx, cy in piece_slots:
+                    # Draw blue square slot first (overlap prevention)
+                    min_dist = 999
+                    for i in range(len(piece_slots) - 1):
+                        dist = abs(piece_slots[i+1][0] - piece_slots[i][0])
+                        min_dist = min(min_dist, dist)
+                    
+                    size = int(pitch * 5.0)
+                    if min_dist < size: size = min_dist - 2
+                    
+                    cv2.rectangle(preview, (cx - size//2, cy - size//2), 
+                                 (cx + size//2, cy + size//2), (255, 0, 0), 1)
+                    
+                    # Draw the 5x5 probe grid (Zero Spacing)
+                    for r in range(5):
+                        for c in range(5):
+                            px = cx + (c - 2) * pitch
+                            py = cy + (r - 2) * pitch
+                            
+                            # Sampling box
+                            m = pitch // 2
+                            cv2.rectangle(preview, (px-m, py-m), (px+m, py+m), (80, 80, 80), 1)
+                            cv2.circle(preview, (px, py), 2, (0, 0, 255), -1)
+
+                cv2.imshow("Calibration", preview)
+                key = cv2.waitKey(100) & 0xFF
+                if key == ord('s'):
+                    break
+                elif key == ord('r'):
+                    print("Resetting points 6 & 7. Click them again!")
+                    self.points = self.points[:5]
+                    self.current_step = 5
+                    self.frame = capture.capture_frame() # Refresh frame
+                    cv2.imshow("Calibration", self.frame)
+                    while len(self.points) < len(self.steps):
+                        cv2.waitKey(1)
         
         cv2.destroyAllWindows()
         
@@ -102,11 +157,10 @@ class CalibrationTool:
         grid_tl = self.points[0]
         grid_br = self.points[1]
         piece_slots = self.points[2:5]
-        block_tl = self.points[5]
-        block_br = self.points[6]
-        
-        tray_cell_w = abs(block_br[0] - block_tl[0])
-        tray_cell_h = abs(block_br[1] - block_tl[1])
+        p6 = self.points[5]
+        p7 = self.points[6]
+        tray_cell_w = int(np.sqrt((p7[0]-p6[0])**2 + (p7[1]-p6[1])**2))
+        tray_cell_h = tray_cell_w # Assume square blocks
         
         print("\n" + "=" * 60)
         print("Calibration Complete!")
