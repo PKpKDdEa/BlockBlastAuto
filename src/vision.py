@@ -139,6 +139,8 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     lower_bound = np.array([0, 50, 50])  
     upper_bound = np.array([180, 255, 255])
     
+    mask = cv2.inRange(hsv, lower_bound, upper_bound)
+    
     # Morphological clean up
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel) # Remove noise
