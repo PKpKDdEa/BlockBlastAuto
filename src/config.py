@@ -71,11 +71,11 @@ class Config:
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
     
     # Vision Throttles
-    VISION_SAT_THRESHOLD: int = 160
-    VISION_VAL_THRESHOLD: int = 170
-    # Exclude Tray Blue-Gray
+    VISION_SAT_THRESHOLD: int = 140
+    VISION_VAL_THRESHOLD: int = 150
+    # Exclude Tray Blue-Gray Only if Saturation is low
     VISION_EXCLUDE_HUE_MIN: int = 80
-    VISION_EXCLUDE_HUE_MAX: int = 145
+    VISION_EXCLUDE_HUE_MAX: int = 150
     
     # Debug
     DEBUG: bool = True

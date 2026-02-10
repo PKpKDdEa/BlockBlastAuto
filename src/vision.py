@@ -127,10 +127,28 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # HSV for vibrancy check
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     
-    # Create mask of vibrant pixels
-    lower = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
-    upper = np.array([180, 255, 255])
-    mask = cv2.inRange(hsv, lower, upper)
+    # Create mask using two-stage logic for better blue-on-blue separation
+    
+    # Stage 1: Absolute Vibrancy (Catches any very bright/vibrant block, even Blue/Cyan)
+    # Background tray is usually saturation < 150. Pieces are high.
+    lower_vibrant = np.array([0, 200, 150])
+    upper_vibrant = np.array([180, 255, 255])
+    mask_vibrant = cv2.inRange(hsv, lower_vibrant, upper_vibrant)
+    
+    # Stage 2: Color Selective (Catches Red, Green, etc. while avoiding Tray Blue)
+    # We use two ranges to carve out the background blue hue
+    lower_r1 = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
+    
+    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper_r2 = np.array([180, 255, 255])
+    
+    mask_r1 = cv2.inRange(hsv, lower_r1, upper_r1)
+    mask_r2 = cv2.inRange(hsv, lower_r2, upper_r2)
+    
+    # Combine: (Extremely Vibrant) OR (Correct Color and Medium Vibrancy)
+    mask = cv2.bitwise_or(mask_vibrant, mask_r1)
+    mask = cv2.bitwise_or(mask, mask_r2)
     
     # Clean noise
     kernel = np.ones((3, 3), np.uint8)
@@ -191,17 +209,24 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
             patch = mask[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
             
             if patch.size > 0:
-                avg_sat = np.mean(patch) # This is WRONG, patch is from 'mask' (binary)
-                # Wait, 'patch' was defined as mask[...].
-                # Let's use the actual HSV patch for diagnostics
+                # Use the same two-stage logic to decide if individual cell is filled
+                # (This mirrors the mask generation above for consistency)
                 hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-                avg_sat = np.mean(hsv_patch[:, :, 1])
-                avg_val = np.mean(hsv_patch[:, :, 2])
+                avg_h = np.mean(hsv_patch[:, :, 0])
+                avg_s = np.mean(hsv_patch[:, :, 1])
+                avg_v = np.mean(hsv_patch[:, :, 2])
                 
-                if avg_sat > config.VISION_SAT_THRESHOLD and avg_val > config.VISION_VAL_THRESHOLD:
+                is_filled = False
+                if avg_s > 200 and avg_v > 150: # Absolute vibrancy pass
+                    is_filled = True
+                elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
+                     (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
+                    is_filled = True
+                
+                if is_filled:
                     grid[r, c] = 1
                 elif config.DEBUG:
-                    print(f"    Block at ({r},{c}) failed: Sat={avg_sat:.1f}, Val={avg_val:.1f} (Needs >{config.VISION_SAT_THRESHOLD}, >{config.VISION_VAL_THRESHOLD})")
+                    print(f"    Block at ({r},{c}) failed: Hue={avg_h:.0f}, Sat={avg_s:.1f}, Val={avg_v:.1f}")
                 
     if config.DEBUG:
         print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Inferred Grid: {rows}x{cols}")
@@ -322,9 +347,18 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
-        lower = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
-        upper = np.array([180, 255, 255])
-        mask = cv2.inRange(hsv, lower, upper)
+        
+        # Two-stage mask for visualization
+        lower_vibrant = np.array([0, 200, 150])
+        upper_vibrant = np.array([180, 255, 255])
+        mask_vibrant = cv2.inRange(hsv, lower_vibrant, upper_vibrant)
+        mask_r1 = cv2.inRange(hsv, np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD]), 
+                                     np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255]))
+        mask_r2 = cv2.inRange(hsv, np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD]), 
+                                     np.array([180, 255, 255]))
+        mask = cv2.bitwise_or(mask_vibrant, mask_r1)
+        mask = cv2.bitwise_or(mask, mask_r2)
+        
         kernel = np.ones((3, 3), np.uint8)
         # Bridge gaps
         mask = cv2.dilate(mask, kernel, iterations=1)
@@ -366,13 +400,26 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                 x1 = bx + int(c * sub_w)
                 x2 = bx + int((c + 1) * sub_w)
                 margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
-                patch = mask[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-                if patch.size > 0 and np.mean(patch) > 127:
-                    cx = int(slot.x + bx + c * sub_w + sub_w // 2)
-                    cy = int(slot.y + by + r * sub_h + sub_h // 2)
-                    cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-                    cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
-                                  (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
+                hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+                if hsv_patch.size > 0:
+                    avg_h = np.mean(hsv_patch[:, :, 0])
+                    avg_s = np.mean(hsv_patch[:, :, 1])
+                    avg_v = np.mean(hsv_patch[:, :, 2])
+                    
+                    is_filled = False
+                    if avg_s > 200 and avg_v > 150:
+                        is_filled = True
+                    elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
+                         (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
+                        is_filled = True
+                        
+                    if is_filled:
+                        cx = int(slot.x + bx + c * sub_w + sub_w // 2)
+                        cy = int(slot.y + by + r * sub_h + sub_h // 2)
+                        cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
+                        # Highlight the sampling area
+                        cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
+                                      (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
     
     return vis
 
@@ -396,26 +443,6 @@ def visualize_drag(frame: np.ndarray, move: Move, start_pos: Tuple[int, int], en
     
     return vis
     
+if __name__ == "__main__":
     print("Testing vision module...")
-    print("Make sure LDPlayer with Block Blast is running!")
-    
-    capture = WindowCapture()
-    if capture.find_window():
-        frame = capture.capture_frame()
-        if frame is not None:
-            print("Captured frame, detecting board...")
-            
-            board = read_board(frame)
-            print("\nDetected board:")
-            print(board)
-            
-            pieces = read_pieces(frame)
-            print(f"\nDetected {len(pieces)} pieces")
-            
-            # Visualize
-            vis = visualize_detection(frame, board, pieces)
-            cv2.imshow("Detection Visualization", vis)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-    else:
-        print("Failed to find window!")
+    # ... rest of test code ...
