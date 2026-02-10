@@ -6,7 +6,7 @@ import numpy as np
 import time
 from typing import List, Tuple, Optional
 from config import config
-from model import Board, Piece
+from model import Board, Piece, Move
 
 
 def read_board(frame: np.ndarray) -> Board:
