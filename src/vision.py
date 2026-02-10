@@ -40,30 +40,45 @@ class TemplateManager:
     def match_and_snap(self, grid: np.ndarray, threshold: float = 0.8) -> np.ndarray:
         """
         Compare input grid against library and snap to the best match.
-        If no match is good enough, returns the original grid.
+        If no match is good enough, we check if it's a 'reasonable' new piece.
         """
         if len(self.templates) == 0:
             return grid
             
         best_match = None
         best_score = 0.0
+        best_name = "unknown"
         
         for template in self.templates:
             # Jaccard Similarity: Intersection over Union
-            intersection = np.logical_and(grid, template).sum()
-            union = np.logical_or(grid, template).sum()
+            int_sum = np.logical_and(grid, template).sum()
+            uni_sum = np.logical_or(grid, template).sum()
             
-            if union == 0: continue
-            score = intersection / float(union)
+            if uni_sum == 0: continue
+            score = int_sum / float(uni_sum)
             
             if score > best_score:
                 best_score = score
                 best_match = template
                 
+        # 1. High Confidence SNAPPING
         if best_match is not None and best_score >= threshold:
             if config.DEBUG and best_score < 1.0:
-                print(f"  Snapped noisy detection to template (Score: {best_score:.2f})")
+                print(f"  Snapped: Similarity {best_score:.2f}")
             return best_match
+            
+        # 2. NOISE FILTERING
+        # If it doesn't match anything and has > 12 blocks, it's almost certainly noise (tray background)
+        # Most complex pieces in Block Blast (like the 3x3 square or 3x3 corner) are <= 9 blocks.
+        block_count = np.sum(grid)
+        if best_score < 0.3 and block_count > 12:
+            if config.DEBUG:
+                print(f"  REJECTED: No template match (best: {best_score:.2f}) and too many blocks ({block_count})")
+            return np.zeros((5, 5), dtype=np.uint8)
+            
+        # 3. UNKNOWN PIECE (Potential for learning)
+        if config.DEBUG and block_count > 0:
+            print(f"  Unknown piece detected (best match: {best_score:.2f}, blocks: {block_count})")
             
         return grid
         
@@ -182,8 +197,8 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # Background tray is usually saturation < 120. Pieces are high.
-    lower_vibrant = np.array([0, 150, 80])
+    # Background tray is usually saturation < 130. Pieces are high.
+    lower_vibrant = np.array([0, 180, 80])
     upper_vibrant = np.array([180, 255, 255])
     mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
@@ -324,6 +339,8 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     
     # Slice the sampled piece into the 5x5 grid
     grid_5x5[start_row : start_row + rows, start_col : start_col + cols] = grid
+    
+    raw_blocks = np.sum(grid_5x5)
     
     # SNAPPING: Use template manager to clean up the detection
     final_grid = template_manager.match_and_snap(grid_5x5)
