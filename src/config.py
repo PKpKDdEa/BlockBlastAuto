@@ -20,7 +20,7 @@ class Config:
     """Main configuration for the Block Blast bot."""
     
     # Window detection
-    WINDOW_TITLE: str = "LDPlayer"  # Adjust if needed
+    WINDOW_TITLE: str = "雷電模擬器"  # Supports Chinese localized LDPlayer
     
     # Game region (will be calibrated)
     # Default values for 1080x1920 resolution
