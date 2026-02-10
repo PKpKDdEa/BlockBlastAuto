@@ -192,8 +192,8 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # Background tray is usually saturation < 120. Pieces are high.
-    lower_vibrant = np.array([0, 120, 50])
+    # Background tray is usually saturation < 160. Pieces are high.
+    lower_vibrant = np.array([0, 160, 60])
     upper_vibrant = np.array([180, 255, 255])
     mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
@@ -296,6 +296,15 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 if patch.size > 0 and np.mean(patch) > 100:
                     grid_5x5[r, c] = 1
                     
+    # Diagnostic: Print average HSV of center cell if we found "too many" or "no" blocks
+    if config.DEBUG:
+        center_patch = hsv[max(0, cy-5):min(sh, cy+5), max(0, cx-5):min(sw, cx+5)]
+        avg_hsv = np.mean(center_patch, axis=(0, 1)).astype(int)
+        # If the grid is totally full (25) or empty (0), log the center color
+        block_count = np.sum(grid_5x5)
+        if block_count == 25 or block_count == 0:
+            print(f"  [Slot Diagnostic] Center HSV: {avg_hsv} -> Blocks: {block_count}")
+            
     return grid_5x5
 
 
