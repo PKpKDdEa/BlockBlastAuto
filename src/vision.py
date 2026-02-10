@@ -506,14 +506,85 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                         cv2.rectangle(vis, (int(slot.x + x1 + margin_w), int(slot.y + y1 + margin_h)), 
                                       (int(slot.x + x2 - margin_w), int(slot.y + y2 - margin_h)), (0, 255, 0), 1)
 
-        # 3. Label Piece Identity and Match Score
-        final_5x5, score, name = template_manager.match_and_snap(get_piece_grid(frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]))
-        if name != "empty" and name != "noise":
-            label = f"{name} ({score:.2f})"
-            color = (0, 255, 0) if score > 0.9 else (0, 255, 255) if score > 0.7 else (0, 165, 255)
-            cv2.putText(vis, label, (slot.x, slot.y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
-    
     return vis
+
+
+def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarray:
+    """
+    Creates a dedicated, stable analysis frame showing piece identities and grids.
+    This window only updates when a new turn starts, so it won't 'flash'.
+    """
+    # Create a nice dark background for analysis
+    vis = np.zeros((600, 800, 3), dtype=np.uint8)
+    cv2.putText(vis, "PIECE DIAGNOSTICS (Updated Once Per Turn)", (20, 30), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
+    
+    for i, slot in enumerate(config.PIECE_SLOTS):
+        x_off = 20 + i * 260
+        y_off = 60
+        
+        # Draw slot header
+        cv2.putText(vis, f"Slot {i}", (x_off, y_off), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (150, 150, 150), 1)
+        
+        # Get piece from slots
+        piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
+        if piece_region.size == 0: continue
+        
+        # Show piece crop (resized for visibility)
+        crop = cv2.resize(piece_region, (200, 180))
+        vis[y_off+20:y_off+200, x_off:x_off+200] = crop
+        
+        # Get identification details
+        grid_5x5 = get_piece_grid(piece_region)
+        if grid_5x5 is not None:
+            final_grid, score, name = template_manager.match_and_snap(grid_5x5)
+            
+            # Label
+            label = f"{name}"
+            l2 = f"Score: {score:.2f}"
+            color = (0, 255, 0) if score > 0.9 else (0, 255, 255) if score > 0.7 else (0, 165, 255)
+            
+            cv2.putText(vis, label, (x_off, y_off + 220), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            cv2.putText(vis, l2, (x_off, y_off + 240), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+            
+            # Draw the 5x5 digital grid representation
+            grid_y = y_off + 260
+            cell_size = 25
+            for r in range(5):
+                for c in range(5):
+                    gx = x_off + c * cell_size
+                    gy = grid_y + r * cell_size
+                    # Filled or empty
+                    if final_grid[r, c]:
+                        cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (0, 100, 255), -1)
+                    else:
+                        cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (40, 40, 40), 1)
+                        
+    return vis
+
+
+def draw_pause_status(vis: np.ndarray, is_paused: bool):
+    """Overlay a large 'PAUSED' message if the bot is not running."""
+    if is_paused:
+        # Semi-transparent overlay
+        overlay = vis.copy()
+        cv2.rectangle(overlay, (0, 0), (vis.shape[1], vis.shape[0]), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.4, vis, 0.6, 0, vis)
+        
+        # Text
+        text = "PAUSED (F10 to Resume)"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale = 1.2
+        thickness = 3
+        size = cv2.getTextSize(text, font, scale, thickness)[0]
+        tx = (vis.shape[1] - size[0]) // 2
+        ty = (vis.shape[0] + size[1]) // 2
+        
+        # Shadow
+        cv2.putText(vis, text, (tx+2, ty+2), font, scale, (0, 0, 0), thickness)
+        # Main text (Yellow/Amber)
+        cv2.putText(vis, text, (tx, ty), font, scale, (0, 190, 255), thickness)
 
 
 def visualize_drag(frame: np.ndarray, move: Move, start_pos: Tuple[int, int], click_pos: Tuple[int, int], expected_pos: Tuple[int, int]) -> np.ndarray:

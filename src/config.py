@@ -77,9 +77,10 @@ class Config:
     VISION_EXCLUDE_HUE_MIN: int = 80
     VISION_EXCLUDE_HUE_MAX: int = 150
     
-    # Debug
+    # Debug & Control
     DEBUG: bool = True
     SAVE_DEBUG_FRAMES: bool = False
+    HOTKEY_PAUSE: str = "f10"
     
     # Heuristic Weights (Phase 3 improvements)
     WEIGHT_EMPTY_CELLS: float = 2.0

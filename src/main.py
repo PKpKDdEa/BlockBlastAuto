@@ -4,11 +4,12 @@ Main orchestration loop for Block Blast automation.
 import time
 import cv2
 from window_capture import WindowCapture
-from vision import read_board, read_pieces, visualize_detection
+from vision import read_board, read_pieces, visualize_detection, visualize_piece_analysis, draw_pause_status
 from model import Board
 from solver import best_move
 from controller import drag_piece
 from config import config
+import keyboard
 
 
 from optimizer import WeightOptimizer
@@ -42,6 +43,21 @@ def main():
     move_count = 0
     
     print("\nStarting automation loop...")
+    print(f"Controls: Press [{config.HOTKEY_PAUSE.upper()}] to Pause/Resume the bot.")
+    
+    # Global state for controls
+    state = {
+        "paused": False,
+        "pieces_last_seen": None,
+        "diag_frame": None
+    }
+    
+    def on_toggle_pause():
+        state["paused"] = not state["paused"]
+        status = "PAUSED" if state["paused"] else "RESUMED"
+        print(f"\n[BOT {status}] - Interactive control is now {'disabled' if state['paused'] else 'enabled'}")
+    
+    keyboard.add_hotkey(config.HOTKEY_PAUSE, on_toggle_pause)
     
     try:
         while True:
@@ -56,10 +72,28 @@ def main():
             board = read_board(frame)
             pieces = read_pieces(frame)
             
-            # Sync internal tracking with reality if needed
-            # (Though the solver uses the frame-based detection)
+            # Show Live Vision (Always active)
+            vis = visualize_detection(frame, board, pieces)
+            draw_pause_status(vis, state["paused"])
+            cv2.imshow("Bot Vision", vis)
             
-            if not any(p is not None for p in pieces):
+            # Show Stable Piece Analysis (Update only on new pieces)
+            has_pieces = any(p is not None for p in pieces)
+            if has_pieces and (state["pieces_last_seen"] is None or pieces != state["pieces_last_seen"]):
+                state["diag_frame"] = visualize_piece_analysis(frame, pieces)
+                state["pieces_last_seen"] = pieces
+            
+            if state["diag_frame"] is not None:
+                cv2.imshow("Piece Analysis", state["diag_frame"])
+            
+            cv2.waitKey(1)
+            
+            # If paused, skip the rest of the logic
+            if state["paused"]:
+                time.sleep(0.1)
+                continue
+                
+            if not has_pieces:
                 if config.DEBUG:
                     print("Waiting for pieces...")
                 time.sleep(1.0)
@@ -69,10 +103,6 @@ def main():
             if config.DEBUG:
                 print("\nBoard State:")
                 print(board)
-                vis = visualize_detection(frame, board, pieces)
-                cv2.imshow("Bot Vision", vis)
-                cv2.waitKey(1)
-                
             move = best_move(board, pieces)
             
             if move is None:
