@@ -136,16 +136,24 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     
-    # Find bounding box of the piece
+    # Bridge small gaps between blocks
+    mask = cv2.dilate(mask, kernel, iterations=1)
+    
+    # Find bounding box of the piece (all significant contours combined)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
         
-    largest_contour = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(largest_contour) < 50: # Ignore tiny noise
+    piece_points = []
+    for cnt in contours:
+        if cv2.contourArea(cnt) > 40: # Threshold for a unit block segment
+            piece_points.append(cnt)
+            
+    if not piece_points:
         return None
         
-    bx, by, bw, bh = cv2.boundingRect(largest_contour)
+    all_points = np.concatenate(piece_points)
+    bx, by, bw, bh = cv2.boundingRect(all_points)
     
     # Infer grid dimensions
     # A single unit is approx 1/5th of the tray width (slot is 200px, unit ~40px)
@@ -304,14 +312,21 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         upper = np.array([180, 255, 255])
         mask = cv2.inRange(hsv, lower, upper)
         kernel = np.ones((3, 3), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        # Bridge gaps
+        mask = cv2.dilate(mask, kernel, iterations=1)
         
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: continue
-        largest_contour = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(largest_contour) < 50: continue
         
-        bx, by, bw, bh = cv2.boundingRect(largest_contour)
+        piece_points = []
+        for cnt in contours:
+            if cv2.contourArea(cnt) > 40:
+                piece_points.append(cnt)
+        
+        if not piece_points: continue
+        
+        all_points = np.concatenate(piece_points)
+        bx, by, bw, bh = cv2.boundingRect(all_points)
         
         # Infer dimensions for visualization (same as detection logic)
         unit_size = slot.width / 5.0
