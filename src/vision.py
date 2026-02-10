@@ -3,6 +3,7 @@ Computer vision module for detecting board state and pieces.
 """
 import cv2
 import numpy as np
+import time
 from typing import List, Tuple, Optional
 from config import config
 from model import Board, Piece
@@ -138,22 +139,31 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     
     mask = cv2.inRange(hsv, lower_bound, upper_bound)
     
-    # Clean up mask with morphological operations
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    # Find bounding box and crop
+    y_idx, x_idx = np.where(mask > 0)
+    if len(y_idx) == 0:
+        return None
+    
+    y_min, y_max = np.min(y_idx), np.max(y_idx)
+    x_min, x_max = np.min(x_idx), np.max(x_idx)
+    
+    # Add small padding
+    pad = 2
+    y_min = max(0, y_min - pad)
+    y_max = min(mask.shape[0]-1, y_max + pad)
+    x_min = max(0, x_min - pad)
+    x_max = min(mask.shape[1]-1, x_max + pad)
+    
+    mask_cropped = mask[y_min:y_max+1, x_min:x_max+1]
     
     # Resize to canonical small grid (e.g., 5x5)
-    # This makes piece matching easier
+    # We want to maintain aspect ratio as much as possible, 
+    # but pieces like 1x5 or 5x1 need to fit.
     canonical_size = 5
-    mask_resized = cv2.resize(mask, (canonical_size, canonical_size), interpolation=cv2.INTER_NEAREST)
+    mask_resized = cv2.resize(mask_cropped, (canonical_size, canonical_size), interpolation=cv2.INTER_NEAREST)
     
     # Threshold to binary
     mask_binary = (mask_resized > 127).astype(np.uint8)
-    
-    # Check if mask is empty
-    if np.sum(mask_binary) == 0:
-        return None
     
     return mask_binary
 
@@ -169,6 +179,60 @@ def load_piece_templates() -> dict:
     # For now, return empty dict
     # In future, this would load from templates/ directory
     return {}
+
+
+def is_board_animating(frame1: np.ndarray, frame2: np.ndarray) -> bool:
+    """
+    Check if the board is currently animating by comparing two frames.
+    """
+    x1, y1 = config.GRID_TOP_LEFT
+    x2, y2 = config.GRID_BOTTOM_RIGHT
+    
+    grid1 = frame1[y1:y2, x1:x2]
+    grid2 = frame2[y1:y2, x1:x2]
+    
+    # Calculate absolute difference
+    diff = cv2.absdiff(grid1, grid2)
+    gray_diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
+    
+    # Blur to ignore minor noise
+    gray_diff = cv2.GaussianBlur(gray_diff, (5, 5), 0)
+    
+    # Count changed pixels
+    changed_pixels = np.sum(gray_diff > 30)
+    
+    # Threshold for animation (tuned for 1080p)
+    return changed_pixels > 500
+
+
+def wait_for_board_stable(capture, timeout_s: float = 3.0):
+    """
+    Wait until the board stops changing (animations finished).
+    """
+    start_time = time.time()
+    last_frame = capture.capture_frame()
+    if last_frame is None:
+        return
+        
+    stable_count = 0
+    required_stable = 2  # consecutive stable frames
+    
+    while time.time() - start_time < timeout_s:
+        time.sleep(0.1)
+        current_frame = capture.capture_frame()
+        if current_frame is None:
+            continue
+            
+        if not is_board_animating(last_frame, current_frame):
+            stable_count += 1
+            if stable_count >= required_stable:
+                return True
+        else:
+            stable_count = 0
+            
+        last_frame = current_frame
+        
+    return False
 
 
 def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) -> np.ndarray:

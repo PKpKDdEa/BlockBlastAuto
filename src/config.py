@@ -69,13 +69,42 @@ class Config:
     FILLED_CELL_COLOR_HSV_LOWER: Tuple[int, int, int] = (0, 0, 100)  # To be tuned
     FILLED_CELL_COLOR_HSV_UPPER: Tuple[int, int, int] = (180, 255, 255)
     
-    # Performance
-    CAPTURE_FPS: int = 5  # Frames per second for screen capture
-    SOLVER_TIME_BUDGET_MS: int = 50  # Max time for solver
-    
     # Debug
-    DEBUG: bool = False  # Enable debug visualization
-    SAVE_DEBUG_FRAMES: bool = False  # Save frames to disk
+    DEBUG: bool = False
+    SAVE_DEBUG_FRAMES: bool = False
+    
+    # Heuristic Weights (Phase 3 improvements)
+    WEIGHT_EMPTY_CELLS: float = 2.0
+    WEIGHT_HOLES_PENALTY: float = -15.0
+    WEIGHT_BUMPINESS: float = -0.5
+    WEIGHT_NEAR_COMPLETE: float = 3.0
+    WEIGHT_STREAK_BONUS: float = 20.0
+    
+    def save(self, path: str = "config.json"):
+        """Save weights to JSON."""
+        import json
+        data = {
+            "WEIGHT_EMPTY_CELLS": self.WEIGHT_EMPTY_CELLS,
+            "WEIGHT_HOLES_PENALTY": self.WEIGHT_HOLES_PENALTY,
+            "WEIGHT_BUMPINESS": self.WEIGHT_BUMPINESS,
+            "WEIGHT_NEAR_COMPLETE": self.WEIGHT_NEAR_COMPLETE,
+            "WEIGHT_STREAK_BONUS": self.WEIGHT_STREAK_BONUS
+        }
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=4)
+            
+    def load(self, path: str = "config.json"):
+        """Load weights from JSON."""
+        import json
+        import os
+        if os.path.exists(path):
+            with open(path, 'r') as f:
+                data = json.load(f)
+                self.WEIGHT_EMPTY_CELLS = data.get("WEIGHT_EMPTY_CELLS", self.WEIGHT_EMPTY_CELLS)
+                self.WEIGHT_HOLES_PENALTY = data.get("WEIGHT_HOLES_PENALTY", self.WEIGHT_HOLES_PENALTY)
+                self.WEIGHT_BUMPINESS = data.get("WEIGHT_BUMPINESS", self.WEIGHT_BUMPINESS)
+                self.WEIGHT_NEAR_COMPLETE = data.get("WEIGHT_NEAR_COMPLETE", self.WEIGHT_NEAR_COMPLETE)
+                self.WEIGHT_STREAK_BONUS = data.get("WEIGHT_STREAK_BONUS", self.WEIGHT_STREAK_BONUS)
 
 
 # Global config instance

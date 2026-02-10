@@ -70,18 +70,16 @@ def move_mouse_and_drag(start_xy: Tuple[int, int], end_xy: Tuple[int, int], dura
     duration_sec = duration_ms / 1000.0
     
     # Move to start position
-    pyautogui.moveTo(start_xy[0], start_xy[1], duration=0.1)
-    time.sleep(0.05)
+    pyautogui.moveTo(start_xy[0], start_xy[1], duration=0.2)
+    pyautogui.mouseDown()
+    time.sleep(0.1) # Wait for click to register
     
     # Perform drag
-    pyautogui.drag(
-        end_xy[0] - start_xy[0],
-        end_xy[1] - start_xy[1],
-        duration=duration_sec,
-        button='left'
-    )
+    pyautogui.moveTo(end_xy[0], end_xy[1], duration=duration_sec)
+    time.sleep(0.1) # Wait for movement to finish
+    pyautogui.mouseUp()
     
-    time.sleep(0.05)
+    time.sleep(0.1)
 
 
 def drag_piece(piece_index: int, target_row: int, target_col: int) -> None:

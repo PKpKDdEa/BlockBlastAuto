@@ -59,6 +59,8 @@ class Board:
         self.rows = rows
         self.cols = cols
         self.grid = np.zeros((rows, cols), dtype=np.int8)
+        self.combo_streak = 0  # Number of consecutive placements that cleared lines
+        self.total_score = 0
     
     @classmethod
     def from_array(cls, grid: np.ndarray) -> 'Board':
@@ -68,8 +70,12 @@ class Board:
         return board
     
     def copy(self) -> 'Board':
-        """Create a copy of this board."""
-        return Board.from_array(self.grid)
+        """Create a fast copy of this board."""
+        new_board = Board(self.rows, self.cols)
+        new_board.grid[:] = self.grid
+        new_board.combo_streak = self.combo_streak
+        new_board.total_score = self.total_score
+        return new_board
     
     def __str__(self) -> str:
         """ASCII representation of board."""
@@ -153,8 +159,27 @@ def apply_move(board: Board, piece: Piece, row: int, col: int) -> Tuple[Board, i
     for c in cols_to_clear:
         new_board.grid[:, c] = 0
     
-    # Calculate score (simplified)
-    score_gain = lines_cleared * 10 + len(piece.cells)
+    # Calculate score based on official-like rules
+    # 1. Base points for pieces placed
+    base_points = len(piece.cells)
+    
+    # 2. Line clear points (exponential for combos)
+    clear_points = 0
+    if lines_cleared > 0:
+        # Combo: multiple lines in one move
+        # e.g., 1 line = 10, 2 lines = 30, 3 lines = 60, etc.
+        clear_points = (lines_cleared * (lines_cleared + 1) // 2) * 10
+        
+        # Streak: consecutive moves that clear lines
+        # This usually multiples the clear_points
+        new_board.combo_streak += 1
+        streak_multiplier = max(1, new_board.combo_streak)
+        clear_points *= streak_multiplier
+    else:
+        new_board.combo_streak = 0
+    
+    score_gain = base_points + clear_points
+    new_board.total_score += score_gain
     
     return new_board, lines_cleared, score_gain
 

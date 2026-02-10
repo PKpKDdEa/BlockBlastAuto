@@ -1,49 +1,47 @@
-"""
-Solver engine for computing best moves using heuristics.
-"""
-import numpy as np
-from typing import List, Optional
-from model import Board, Piece, Move, is_legal, apply_move, generate_moves
+from model import Board, Piece, Move, is_legal, apply_move
 from config import config
-
+import numpy as np
 
 def evaluate_board(board: Board) -> float:
     """
-    Evaluate board state using heuristic features.
-    
-    Features:
-    - Empty cells (more is better)
-    - Holes (cells surrounded by filled cells, fewer is better)
-    - Near-complete lines (rows/cols with 1-2 empty cells)
-    - Central free space (prefer empty cells near center)
-    
-    Args:
-        board: Board state to evaluate
-    
-    Returns:
-        Score (higher is better)
+    Evaluate board state using weighted heuristic features.
     """
     score = 0.0
     
-    # Count empty cells
+    # 1. Empty cells
     empty_cells = np.sum(board.grid == 0)
-    score += empty_cells * 0.1
+    score += empty_cells * config.WEIGHT_EMPTY_CELLS
     
-    # Count holes (empty cells surrounded by filled cells)
+    # 2. Holes penalty
     holes = 0
-    for r in range(1, board.rows - 1):
-        for c in range(1, board.cols - 1):
+    for r in range(board.rows):
+        for c in range(board.cols):
             if board.grid[r, c] == 0:
-                # Check if surrounded
-                neighbors = [
-                    board.grid[r-1, c], board.grid[r+1, c],
-                    board.grid[r, c-1], board.grid[r, c+1]
-                ]
-                if all(n == 1 for n in neighbors):
+                is_hole = False
+                if (c > 0 and board.grid[r, c-1] == 1) and (c < board.cols-1 and board.grid[r, c+1] == 1):
+                    is_hole = True
+                if (r > 0 and board.grid[r-1, c] == 1) and (r < board.rows-1 and board.grid[r+1, c] == 1):
+                    is_hole = True
+                if is_hole:
                     holes += 1
-    score -= holes * 2.0
+    score += holes * config.WEIGHT_HOLES_PENALTY
     
-    # Near-complete lines (rows/cols with 1-2 empty cells)
+    # 3. Bumpiness
+    heights = []
+    for c in range(board.cols):
+        h = 0
+        for r in range(board.rows):
+            if board.grid[r, c] == 1:
+                h = board.rows - r
+                break
+        heights.append(h)
+    
+    bumpiness = 0
+    for i in range(len(heights) - 1):
+        bumpiness += abs(heights[i] - heights[i+1])
+    score += bumpiness * config.WEIGHT_BUMPINESS
+    
+    # 4. Near-complete lines
     near_complete = 0
     for r in range(board.rows):
         empty_in_row = np.sum(board.grid[r, :] == 0)
@@ -54,86 +52,67 @@ def evaluate_board(board: Board) -> float:
         empty_in_col = np.sum(board.grid[:, c] == 0)
         if 1 <= empty_in_col <= 2:
             near_complete += 1
-    score += near_complete * 0.5
+    score += near_complete * config.WEIGHT_NEAR_COMPLETE
     
-    # Central free space (prefer keeping center clear)
-    center_r = board.rows // 2
-    center_c = board.cols // 2
-    center_region = board.grid[center_r-1:center_r+2, center_c-1:center_c+2]
-    central_empty = np.sum(center_region == 0)
-    score += central_empty * 0.3
+    # 5. Combo streak bonus
+    score += board.combo_streak * config.WEIGHT_STREAK_BONUS
     
     return score
 
 
-def evaluate_move(board: Board, piece: Piece, move: Move) -> float:
+def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0) -> Tuple[float, Optional[List[Move]]]:
     """
-    Evaluate a specific move.
-    
-    Args:
-        board: Current board state
-        piece: Piece to place
-        move: Move to evaluate
-    
-    Returns:
-        Score for this move (higher is better)
+    Find the best sequence of moves for all available pieces using depth-first search.
     """
-    # Apply move and get resulting board
-    new_board, lines_cleared, score_gain = apply_move(board, piece, move.row, move.col)
+    if not pieces:
+        return evaluate_board(board), []
     
-    # Base score from lines cleared (heavily weighted)
-    score = lines_cleared * 10.0
+    best_score = float('-inf')
+    best_seq = None
     
-    # Add immediate score gain
-    score += score_gain * 0.5
+    # Try all available pieces as the first piece in this subsequence
+    for i, piece in enumerate(pieces):
+        remaining_pieces = pieces[:i] + pieces[i+1:]
+        
+        # Generate all legal moves for this piece
+        moves = []
+        for r in range(board.rows):
+            for c in range(board.cols):
+                if is_legal(board, piece, r, c):
+                    moves.append(Move(piece_index=piece.id, row=r, col=c))
+        
+        # Optimization: Sort moves by immediate score gain to prune or prioritize
+        for move in moves:
+            new_board, _, _ = apply_move(board, piece, move.row, move.col)
+            
+            # Recursive call for remaining pieces
+            score, seq = find_sequence_best_move(new_board, remaining_pieces, depth + 1)
+            
+            if score > best_score:
+                best_score = score
+                best_seq = [move] + (seq if seq else [])
     
-    # Evaluate resulting board state
-    board_score = evaluate_board(new_board)
-    score += board_score
-    
-    return score
+    return best_score, best_seq
 
 
 def best_move(board: Board, pieces: List[Piece], time_budget_ms: int = None) -> Optional[Move]:
     """
-    Find the best move using heuristic evaluation.
-    
-    Args:
-        board: Current board state
-        pieces: Available pieces
-        time_budget_ms: Time budget in milliseconds (currently unused, for future optimization)
-    
-    Returns:
-        Best move or None if no legal moves exist
+    Compute the best move by looking at the entire sequence of available pieces.
     """
-    if time_budget_ms is None:
-        time_budget_ms = config.SOLVER_TIME_BUDGET_MS
-    
-    # Generate all legal moves
-    moves = generate_moves(board, pieces)
-    
-    if not moves:
+    # Filter out None pieces (empty slots)
+    valid_pieces = [p for p in pieces if p is not None]
+    if not valid_pieces:
         return None
-    
-    # Evaluate each move
-    best_score = float('-inf')
-    best_mv = None
-    
-    for move in moves:
-        piece = pieces[move.piece_index]
-        score = evaluate_move(board, piece, move)
-        move.score = score
         
-        if score > best_score:
-            best_score = score
-            best_mv = move
+    print(f"Solving for {len(valid_pieces)} pieces sequence...")
     
-    if config.DEBUG:
-        print(f"Evaluated {len(moves)} moves, best score: {best_score:.2f}")
-        if best_mv:
-            print(f"Best move: piece {best_mv.piece_index} at ({best_mv.row}, {best_mv.col})")
+    # Find the best sequence
+    best_score, best_seq = find_sequence_best_move(board, valid_pieces)
     
-    return best_mv
+    if best_seq and len(best_seq) > 0:
+        return best_seq[0]
+    
+    return None
 
 
 if __name__ == "__main__":

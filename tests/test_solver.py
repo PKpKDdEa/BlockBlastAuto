@@ -1,10 +1,13 @@
-"""
-Unit tests for solver heuristics.
-"""
 import pytest
 import numpy as np
-from model import Board, Piece
-from solver import evaluate_board, evaluate_move, best_move
+import sys
+import os
+
+# Ensure src is in path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+
+from model import Board, Piece, Move
+from solver import evaluate_board, best_move
 
 
 def test_evaluate_board_empty():
@@ -35,24 +38,6 @@ def test_evaluate_board_holes():
     assert score2 < score1
 
 
-def test_evaluate_move_line_clear():
-    """Test that moves clearing lines score higher."""
-    board = Board(8, 8)
-    board.grid[0, :7] = 1  # Almost complete row
-    
-    piece = Piece(id=0, cells=[(0, 0)], width=1, height=1)
-    
-    from model import Move
-    move_clear = Move(piece_index=0, row=0, col=7)  # Completes row
-    move_normal = Move(piece_index=0, row=5, col=5)  # Normal placement
-    
-    score_clear = evaluate_move(board, piece, move_clear)
-    score_normal = evaluate_move(board, piece, move_normal)
-    
-    # Line-clearing move should score much higher
-    assert score_clear > score_normal
-
-
 def test_best_move_simple():
     """Test best move selection."""
     board = Board(8, 8)
@@ -80,6 +65,7 @@ def test_best_move_prefers_line_clear():
     move = best_move(board, pieces)
     
     # Should choose to complete the row
+    assert move is not None
     assert move.row == 0
     assert move.col == 7
 
@@ -98,24 +84,27 @@ def test_best_move_no_legal_moves():
     assert move is None
 
 
-def test_best_move_multiple_pieces():
-    """Test with multiple pieces."""
+def test_best_move_sequence_optimization():
+    """Test that solver considers future moves in a sequence."""
+    # Use a board where greedy placement of first piece blocks second piece's clear.
     board = Board(8, 8)
-    board.grid[0, :6] = 1  # Partial row
+    board.grid[0, :7] = 1 # Row 0 needs (0, 7)
+    board.grid[1, :7] = 1 # Row 1 needs (1, 7)
+    
+    # Piece 0: (0,0) (1,0) - Vertical 2-block.
+    # If placed at (0, 7), it clears Row 0 AND Row 1.
+    # Piece 1: (0,0) - 1x1.
     
     pieces = [
-        Piece(id=0, cells=[(0, 0)], width=1, height=1),  # Single
-        Piece(id=1, cells=[(0, 0), (0, 1)], width=2, height=1),  # 2-block
-        Piece(id=2, cells=[(0, 0), (0, 1), (0, 2)], width=3, height=1),  # 3-block
+        Piece(id=0, cells=[(0, 0), (1, 0)], width=1, height=2),
+        Piece(id=1, cells=[(0, 0)], width=1, height=1),
     ]
     
     move = best_move(board, pieces)
-    
     assert move is not None
-    # Should prefer the 2-block piece to complete the row
-    assert move.piece_index == 1
+    assert move.piece_index == 0
     assert move.row == 0
-    assert move.col == 6
+    assert move.col == 7
 
 
 if __name__ == "__main__":

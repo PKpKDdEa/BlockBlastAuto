@@ -10,99 +10,95 @@ from controller import drag_piece
 from config import config
 
 
+from optimizer import WeightOptimizer
+
 def main():
     """Main bot loop."""
     print("=" * 50)
-    print("Block Blast Automation Bot")
+    print("Block Blast Automation Bot (Enhanced)")
     print("=" * 50)
     print()
     
-    # Initialize window capture
-    print("Looking for LDPlayer window...")
+    # Initialize components
+    config.load()
+    optimizer = WeightOptimizer()
+    current_weights = optimizer.get_current_weights()
+    print("Loaded heuristic weights:")
+    import json
+    print(json.dumps(current_weights, indent=4))
+    
+    print("\nLooking for LDPlayer window...")
     capture = WindowCapture()
     
     if not capture.find_window():
         print("ERROR: Could not find LDPlayer window!")
-        print("Make sure LDPlayer is running with Block Blast open.")
         return
     
     print(f"✓ Found window: {capture.window_title}")
-    print()
     
-    # Calculate loop delay for target FPS
-    loop_delay = 1.0 / config.CAPTURE_FPS
-    
-    print("Starting automation loop...")
-    print("Press Ctrl+C to stop, or move mouse to top-left corner (failsafe)")
-    print()
-    
+    # Simulation state
+    sim_board = Board(config.GRID_ROWS, config.GRID_COLS)
     move_count = 0
+    
+    print("\nStarting automation loop...")
     
     try:
         while True:
             loop_start = time.time()
             
-            # Capture frame
+            # 1. Capture and Detect
             frame = capture.capture_frame()
             if frame is None:
-                print("WARNING: Failed to capture frame, retrying...")
-                time.sleep(1)
                 continue
-            
-            # Detect board state
+                
+            # Read actual board and pieces
             board = read_board(frame)
-            
-            # Detect available pieces
             pieces = read_pieces(frame)
             
-            if len(pieces) == 0:
+            # Sync internal tracking with reality if needed
+            # (Though the solver uses the frame-based detection)
+            
+            if not any(p is not None for p in pieces):
                 if config.DEBUG:
-                    print("No pieces detected, waiting...")
-                time.sleep(0.5)
+                    print("Waiting for pieces...")
+                time.sleep(1.0)
                 continue
             
-            if config.DEBUG:
-                print(f"\nMove #{move_count + 1}")
-                print("Board state:")
-                print(board)
-                print(f"Detected {len(pieces)} pieces")
-            
-            # Show visualization if debug enabled
-            if config.DEBUG:
-                vis = visualize_detection(frame, board, pieces)
-                cv2.imshow("Bot Vision", vis)
-                cv2.waitKey(1)
-            
-            # Compute best move
+            # 2. Solve Best Move (Sequence optimized)
             move = best_move(board, pieces)
             
             if move is None:
                 print("\n" + "=" * 50)
-                print("GAME OVER: No legal moves available!")
-                print(f"Total moves made: {move_count}")
+                print("GAME OVER: No legal moves!")
+                print(f"Total Score: {board.total_score}")
+                print(f"Total Moves: {move_count}")
+                
+                # SELF-IMPROVEMENT: Record and evolve
+                optimizer.record_game(board.total_score, move_count, current_weights)
+                new_w = optimizer.evolve_weights()
+                optimizer.apply_weights(new_w)
+                print("Evolved weights for next run.")
                 print("=" * 50)
                 break
             
-            # Execute move
-            print(f"Move #{move_count + 1}: Placing piece {move.piece_index} at ({move.row}, {move.col}) [score: {move.score:.2f}]")
+            # 3. Execute Move
+            piece = pieces[move.piece_index]
+            print(f"Move #{move_count + 1}: Placing {piece.width}x{piece.height} at ({move.row}, {move.col}) [Streak: {board.combo_streak}]")
             drag_piece(move.piece_index, move.row, move.col)
             
             move_count += 1
             
-            # Wait for animation and next frame
-            time.sleep(0.2)  # Wait for piece placement animation
+            # 3. Wait for animation to finish
+            from vision import wait_for_board_stable
+            print("Done. Waiting for animation...")
+            wait_for_board_stable(capture)
             
-            # Maintain target FPS
-            elapsed = time.time() - loop_start
-            if elapsed < loop_delay:
-                time.sleep(loop_delay - elapsed)
-    
     except KeyboardInterrupt:
-        print("\n\nBot stopped by user.")
+        print("\nBot stopped by user.")
         print(f"Total moves made: {move_count}")
-    
+        print(f"Final Score: {board.total_score}")
     except Exception as e:
-        print(f"\n\nERROR: {e}")
+        print(f"\nERROR: {e}")
         import traceback
         traceback.print_exc()
     
