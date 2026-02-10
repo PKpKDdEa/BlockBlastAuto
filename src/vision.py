@@ -118,97 +118,63 @@ def read_pieces(frame: np.ndarray) -> List[Piece]:
 
 def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
-    Detect binary mask of piece shape from piece slot image.
-    
-    Args:
-        piece_region: BGR image of piece slot
-    
-    Returns:
-        Binary mask (2D array) where 1 = piece cell, 0 = empty
-        Returns None if no piece detected
+    Detect the piece shape by sampling a 5x5 grid within the slot.
+    This is much more robust than contour detection for Block Blast.
     """
     if piece_region.size == 0:
         return None
     
-    # Convert to HSV
+    h, w = piece_region.shape[:2]
+    cell_w = w / 5.0
+    cell_h = h / 5.0
+    
+    # Grid to store filled cells
+    grid = np.zeros((5, 5), dtype=np.uint8)
+    
+    # HSV for vibrancy check
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     
-    # Inset the region slightly to avoid capturing slot borders
-    inset = 10
-    hsv_subset = hsv[inset:-inset, inset:-inset]
-    
-    # Create mask for colored regions (piece cells)
-    # We use two ranges to EXCLUDE the tray blue (approx 100-135)
-    lower1 = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
-    upper1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
-    
-    lower2 = np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
-    upper2 = np.array([180, 255, 255])
-    
-    mask1 = cv2.inRange(hsv_subset, lower1, upper1)
-    mask2 = cv2.inRange(hsv_subset, lower2, upper2)
-    mask_small = cv2.bitwise_or(mask1, mask2)
-    
-    # Reconstruct full-size mask with black border
-    mask = np.zeros(hsv.shape[:2], dtype=np.uint8)
-    mask[inset:-inset, inset:-inset] = mask_small
-    
-    if config.SAVE_DEBUG_FRAMES:
-        import os
-        os.makedirs("debug", exist_ok=True)
-        cv2.imwrite(f"debug/piece_region_{int(time.time()*1000)}.png", piece_region)
-        cv2.imwrite(f"debug/mask_{int(time.time()*1000)}.png", mask)
-    
-    # Morphological clean up - use larger kernel if needed
-    kernel = np.ones((5, 5), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel) # Remove substantial noise
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel) # Fill gaps
-    
-    # Use contours to isolate the piece
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
+    found_any = False
+    for r in range(5):
+        for c in range(5):
+            # Calculate cell boundaries
+            y1, y2 = int(r * cell_h), int((r + 1) * cell_h)
+            x1, x2 = int(c * cell_w), int((c + 1) * cell_w)
+            
+            # Sample the central patch of the cell (avoid borders)
+            margin_h = int((y2 - y1) * 0.25)
+            margin_w = int((x2 - x1) * 0.25)
+            patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+            
+            if patch.size == 0:
+                continue
+                
+            # Classify vibrancy (Pieces are VERY saturated and bright)
+            avg_sat = np.mean(patch[:, :, 1])
+            avg_val = np.mean(patch[:, :, 2])
+            
+            # Use thresholds from config but slightly more lenient for pieces
+            if avg_sat > 100 and avg_val > 100:
+                grid[r, c] = 1
+                found_any = True
+                
+    if not found_any:
         return None
         
-    # Find largest contour to ignore small noise
-    largest_contour = max(contours, key=cv2.contourArea)
-    area = cv2.contourArea(largest_contour)
+    # Crop the 5x5 grid to the minimal bounding box of the piece
+    rows, cols = np.where(grid == 1)
+    min_r, max_r = np.min(rows), np.max(rows)
+    min_c, max_c = np.min(cols), np.max(cols)
     
-    slot_w, slot_h = piece_region.shape[1], piece_region.shape[0]
-    slot_area = slot_w * slot_h
-    
-    # If detection fills too much of the slot (> 80%), it's probably the tray background
-    if area > slot_area * 0.8:
-        if config.DEBUG:
-            print(f"  Slot Region {piece_region.shape}: Area too large ({area:.0f}/{slot_area:.0f}), ignoring as background.")
-        return None
-        
-    x, y, w, h = cv2.boundingRect(largest_contour)
-    
-    # If piece is too small, ignore
-    if area < 50:
-        return None
-        
-    mask_cropped = mask[y:y+h, x:x+w]
-    
-    # Inferred dimensions
-    cell_size = slot_w / 5.0
-    cols = max(1, int(round(w / cell_size)))
-    rows = max(1, int(round(h / cell_size)))
-    
-    # Cap to 5x5
-    cols = min(5, cols)
-    rows = min(5, rows)
+    mask_cropped = grid[min_r:max_r+1, min_c:max_c+1]
     
     if config.DEBUG:
-        print(f"  Detected Piece: BBox({x},{y},{w},{h}), Area: {area:.0f}, Inferred: {rows}x{cols}")
-    
-    # Resize to the inferred grid dimensions
-    mask_resized = cv2.resize(mask_cropped, (cols, rows), interpolation=cv2.INTER_NEAREST)
-    
-    # Threshold to binary
-    mask_binary = (mask_resized > 127).astype(np.uint8)
-    
-    return mask_binary
+        print(f"  Grid Detected: {mask_cropped.shape[0]}x{mask_cropped.shape[1]}")
+        # Print a small representation of the grid
+        for row in mask_cropped:
+            print("  " + "".join(["#" if x else "." for x in row]))
+            
+    return mask_cropped
 
 
 def load_piece_templates() -> dict:
