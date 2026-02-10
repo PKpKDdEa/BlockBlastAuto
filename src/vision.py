@@ -192,8 +192,8 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # Background tray is usually saturation < 130. Pieces are high.
-    lower_vibrant = np.array([0, 180, 80])
+    # Background tray is usually saturation < 120. Pieces are high.
+    lower_vibrant = np.array([0, 120, 50])
     upper_vibrant = np.array([180, 255, 255])
     mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
@@ -542,7 +542,8 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
             
             # Label
             label = f"{name}"
-            l2 = f"Score: {score:.2f}"
+            raw_count = np.sum(grid_5x5)
+            l2 = f"Match: {score:.2f} (Blocks: {raw_count})"
             color = (0, 255, 0) if score > 0.9 else (0, 255, 255) if score > 0.7 else (0, 165, 255)
             
             cv2.putText(vis, label, (x_off, y_off + 220), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
@@ -555,10 +556,16 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
                 for c in range(5):
                     gx = x_off + c * cell_size
                     gy = grid_y + r * cell_size
-                    # Filled or empty
+                    
+                    # RAW DETECTED (Light Blue)
+                    if grid_5x5[r, c]:
+                        cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (100, 100, 100), -1)
+                        
+                    # SNAPPED / FINAL (Orange)
                     if final_grid[r, c]:
                         cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (0, 100, 255), -1)
-                    else:
+                    
+                    if not grid_5x5[r, c] and not final_grid[r, c]:
                         cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (40, 40, 40), 1)
         else:
             # Explicitly label empty slots
