@@ -140,7 +140,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Create mask for colored regions (piece cells)
     # Block Blast pieces have very vibrant colors.
     # We increase thresholds to ignore the gray/dark background.
-    lower_bound = np.array([0, 100, 100])  
+    lower_bound = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])  
     upper_bound = np.array([180, 255, 255])
     
     mask_small = cv2.inRange(hsv_subset, lower_bound, upper_bound)

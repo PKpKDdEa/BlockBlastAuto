@@ -64,6 +64,15 @@ class Config:
     FILLED_CELL_COLOR_HSV_LOWER: Tuple[int, int, int] = (0, 0, 100)  # To be tuned
     FILLED_CELL_COLOR_HSV_UPPER: Tuple[int, int, int] = (180, 255, 255)
     
+    # Drag Offsets (Phase 5 fix)
+    # The piece is held ABOVE the cursor, so we need to move the cursor LOWER
+    # to place the piece at the target cells.
+    DRAG_OFFSET_Y: int = 150  # Pixels to shift the drag destination downwards
+    
+    # Vision Throttles
+    VISION_SAT_THRESHOLD: int = 150
+    VISION_VAL_THRESHOLD: int = 150
+    
     # Debug
     DEBUG: bool = True
     SAVE_DEBUG_FRAMES: bool = False

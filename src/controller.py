@@ -92,10 +92,14 @@ def drag_piece(piece_index: int, target_row: int, target_col: int) -> None:
     start_pos = piece_slot_center(piece_index)
     end_pos = cell_center(target_row, target_col)
     
-    if config.DEBUG:
-        print(f"Dragging piece {piece_index} from {start_pos} to {end_pos}")
+    # Apply vertical offset for LDPlayer piece interaction
+    # (The piece is held above the physical cursor)
+    end_pos_offset = (end_pos[0], end_pos[1] + config.DRAG_OFFSET_Y)
     
-    move_mouse_and_drag(start_pos, end_pos)
+    if config.DEBUG:
+        print(f"Dragging piece {piece_index} from {start_pos} to {end_pos_offset} (original target: {end_pos})")
+    
+    move_mouse_and_drag(start_pos, end_pos_offset)
 
 
 def click_position(x: int, y: int) -> None:
