@@ -49,11 +49,11 @@ class Config:
     
     def __post_init__(self):
         if self.PIECE_SLOTS is None:
-            # Calibrated piece slots
+            # Calibrated piece slots (Widened to 250px to avoid clipping)
             self.PIECE_SLOTS = [
-                GameRegion(x=30, y=842, width=200, height=200),
-                GameRegion(x=210, y=840, width=200, height=200),
-                GameRegion(x=392, y=843, width=200, height=200),
+                GameRegion(x=5, y=840, width=250, height=220),
+                GameRegion(x=185, y=840, width=250, height=220),
+                GameRegion(x=367, y=840, width=250, height=220),
             ]
     
     # Mouse control

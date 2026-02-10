@@ -62,11 +62,11 @@ def evaluate_board(board: Board) -> float:
     return score
 
 
-def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0) -> Tuple[float, Optional[List[Move]]]:
+def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0, max_depth: int = 99) -> Tuple[float, Optional[List[Move]]]:
     """
     Find the best sequence of moves for all available pieces using depth-first search.
     """
-    if not pieces:
+    if not pieces or depth >= max_depth:
         # Heuristic score for final state plus actual game score earned
         return board.total_score + evaluate_board(board), []
     
@@ -84,7 +84,7 @@ def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0) -
                     new_board, _, _ = apply_move(board, piece, r, c)
                     
                     # Recursive call for remaining pieces
-                    score, seq = find_sequence_best_move(new_board, remaining_pieces, depth + 1)
+                    score, seq = find_sequence_best_move(new_board, remaining_pieces, depth + 1, max_depth)
                     
                     if score > best_score:
                         best_score = score
@@ -104,8 +104,16 @@ def best_move(board: Board, pieces: List[Piece], time_budget_ms: int = None) -> 
         
     print(f"Solving for {len(valid_pieces)} pieces sequence...")
     
+    # Fast solver mode: if board is > 70% empty, only look 1 piece deep
+    # 64 * 0.7 = 44.8
+    empty_cells = np.sum(board.grid == 0)
+    max_depth = 99
+    if empty_cells > 45:
+        print("  Fast Solver Mode (Board > 70% empty)")
+        max_depth = 1
+        
     # Find the best sequence
-    best_score, best_seq = find_sequence_best_move(board, valid_pieces)
+    best_score, best_seq = find_sequence_best_move(board, valid_pieces, max_depth=max_depth)
     
     if best_seq and len(best_seq) > 0:
         return best_seq[0]
