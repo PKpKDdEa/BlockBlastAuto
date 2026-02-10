@@ -265,6 +265,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
             print("  " + "".join(["#" if x else "." for x in row]))
             
     return final_grid, match_info.get("is_new", False)
+
             
 def find_piece_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
     """Calculates the visual center of mass for a piece mask."""
@@ -274,6 +275,41 @@ def find_piece_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
         cy = int(M["m01"] / M["m00"])
         return cx, cy
     return None
+
+
+def find_best_alignment(mask: np.ndarray, initial_cx: int, initial_cy: int, cw: int, ch: int) -> Tuple[int, int]:
+    """
+    Search for the optimal local offset that maximizes sampling 'sharpness'.
+    'Sharpness' is defined as the average distance of sample patches from the 0.5 threshold.
+    """
+    sh, sw = mask.shape[:2]
+    best_cx, best_cy = initial_cx, initial_cy
+    max_sharpness = -1.0
+    
+    # Search a small window around the centroid (+/- 4 pixels)
+    for dy in range(-4, 5):
+        for dx in range(-4, 5):
+            cx, cy = initial_cx + dx, initial_cy + dy
+            
+            # Simple sharpness metric: Sum of (abs(mean - 0.5) * 2) for all 25 cells
+            current_sharpness = 0.0
+            for r in range(5):
+                for c in range(5):
+                    px, py = cx + (c - 2) * cw, cy + (r - 2) * ch
+                    if 0 <= px < sw and 0 <= py < sh:
+                        m_x, m_y = cw // 2, ch // 2
+                        patch = mask[max(0, py-m_y):min(sh, py+m_y+1), 
+                                     max(0, px-m_x):min(sw, px+m_x+1)]
+                        if patch.size > 0:
+                            mean_val = np.mean(patch) / 255.0
+                            # Sharpness is how far we are from the "uncertain" 0.5 value
+                            current_sharpness += abs(mean_val - 0.5) * 2.0
+            
+            if current_sharpness > max_sharpness:
+                max_sharpness = current_sharpness
+                best_cx, best_cy = cx, cy
+                
+    return best_cx, best_cy
 
 
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
@@ -299,6 +335,9 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
         cx, cy = sw // 2, sh // 2
         
     cw, ch = config.TRAY_CELL_SIZE
+    
+    # ADAPTIVE ALIGNMENT (Sharpness Jitter)
+    cx, cy = find_best_alignment(mask, cx, cy, cw, ch)
     
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
@@ -447,12 +486,14 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         cx_rel, cy_rel = sw // 2, sh // 2
         cw, ch = config.TRAY_CELL_SIZE
         
-        # CENTROID DETECTION (Sync Viz with Logic)
+        # CENTROID DETECTION + ADAPTIVE ALIGNMENT (Sync Viz with Logic)
         centroid = find_piece_centroid(mask)
         if centroid:
-            cx_rel, cy_rel = centroid
-            # Draw the centroid dot
+            cx_rel, cy_rel = find_best_alignment(mask, centroid[0], centroid[1], cw, ch)
+            # Draw the refined centroid dot (Target)
             cv2.circle(vis, (slot.x + int(cx_rel), slot.y + int(cy_rel)), 4, (255, 100, 0), -1)
+            # Draw the original centroid as a smaller dot for comparison
+            cv2.circle(vis, (slot.x + int(centroid[0]), slot.y + int(centroid[1])), 2, (0, 255, 255), -1)
         
         # Draw the 5x5 fixed sampling grid for verification
         for r in range(5):
