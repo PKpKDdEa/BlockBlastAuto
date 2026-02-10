@@ -310,10 +310,10 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
             
             # Bound check
             if 0 <= px < sw and 0 <= py < sh:
-                # Sample a small patch for robustness
-                margin = 2
-                patch = mask[max(0, py-margin):min(sh, py+margin+1), 
-                             max(0, px-margin):min(sw, px+margin+1)]
+                # Continuous Sampling: Patch touches neighbors (Zero Spacing)
+                margin_x, margin_y = cw // 2, ch // 2
+                patch = mask[max(0, py-margin_y):min(sh, py+margin_y+1), 
+                             max(0, px-margin_x):min(sw, px+margin_x+1)]
                 
                 if patch.size > 0 and np.mean(patch) > 100:
                     grid_5x5[r, c] = 1
@@ -462,9 +462,9 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                     vcx, vcy = int(slot.x + centroid[0]), int(slot.y + centroid[1])
                     cv2.circle(vis, (vcx, vcy), 4, (255, 100, 0), -1)
 
-                # Draw sampling boxes (visual indicator of where we "look")
-                box_w, box_h = max(2, cw // 4), max(2, ch // 4)
-                cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (100, 100, 100), 1)
+                # Draw sampling boxes (Zero Spacing continuous grid)
+                box_w, box_h = cw // 2, ch // 2
+                cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (80, 80, 80), 1)
                 
                 # Check if this cell is filled in the detect grid
                 # (Re-run raw detection for this specific cell for visual sync)
