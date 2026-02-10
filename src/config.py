@@ -46,6 +46,7 @@ class Config:
     # Tray configuration (Sampling pieces at bottom)
     TRAY_CELL_SIZE: Tuple[int, int] = (45, 45)  # Calibrated size of a single block in the tray
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
+    PIECE_SLOTS: List[GameRegion] = None
     
     def __post_init__(self):
         if self.TRAY_SLOT_CENTERS is None:
