@@ -42,9 +42,12 @@ def read_board(frame: np.ndarray) -> Board:
             
             patch = grid_region[y_start:y_end, x_start:x_end]
             
-            # Classify cell as filled or empty
             is_filled = classify_cell(patch)
             board.grid[row, col] = 1 if is_filled else 0
+            
+    if config.DEBUG:
+        filled_count = np.sum(board.grid == 1)
+        print(f"Board detected: {filled_count}/64 cells filled")
     
     return board
 
@@ -104,13 +107,11 @@ def read_pieces(frame: np.ndarray) -> List[Piece]:
             # Create piece from mask
             piece = Piece.from_mask(piece_id=slot_idx, mask=mask)
             pieces.append(piece)
+            if config.DEBUG:
+                print(f"Piece {slot_idx} detected: {piece.width}x{piece.height}")
         else:
-            # Empty slot - create a dummy piece that won't match anything
-            # This prevents index errors when solver expects 3 pieces
+            # Empty slot
             pieces.append(None)
-    
-    # Filter out None values
-    pieces = [p for p in pieces if p is not None]
     
     return pieces
 

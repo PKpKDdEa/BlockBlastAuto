@@ -1,0 +1,68 @@
+[
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 2.0,
+            "WEIGHT_HOLES_PENALTY": -15.0,
+            "WEIGHT_BUMPINESS": -0.5,
+            "WEIGHT_NEAR_COMPLETE": 3.0,
+            "WEIGHT_STREAK_BONUS": 20.0
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.81513909977731,
+            "WEIGHT_HOLES_PENALTY": -14.613728397711872,
+            "WEIGHT_BUMPINESS": -0.49914727121496116,
+            "WEIGHT_NEAR_COMPLETE": 3.0170278448030086,
+            "WEIGHT_STREAK_BONUS": 21.450372506942216
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 2.05041194070816,
+            "WEIGHT_HOLES_PENALTY": -16.059291674125028,
+            "WEIGHT_BUMPINESS": -0.47807122464355833,
+            "WEIGHT_NEAR_COMPLETE": 2.856166105798646,
+            "WEIGHT_STREAK_BONUS": 20.06099826288896
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.855178498138442,
+            "WEIGHT_HOLES_PENALTY": -15.060899415295138,
+            "WEIGHT_BUMPINESS": -0.49421482471543676,
+            "WEIGHT_NEAR_COMPLETE": 3.296321319170281,
+            "WEIGHT_STREAK_BONUS": 18.527828443949808
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 2.1178556170629887,
+            "WEIGHT_HOLES_PENALTY": -13.874308394985707,
+            "WEIGHT_BUMPINESS": -0.5148691126133866,
+            "WEIGHT_NEAR_COMPLETE": 2.7871609827333956,
+            "WEIGHT_STREAK_BONUS": 18.70605175046738
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9271304176365507,
+            "WEIGHT_HOLES_PENALTY": -15.24813588469489,
+            "WEIGHT_BUMPINESS": -0.47449032357328846,
+            "WEIGHT_NEAR_COMPLETE": 3.0105621052508043,
+            "WEIGHT_STREAK_BONUS": 21.706891824594422
+        }
+    }
+]

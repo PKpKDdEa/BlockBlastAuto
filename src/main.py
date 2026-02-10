@@ -66,6 +66,13 @@ def main():
                 continue
             
             # 2. Solve Best Move (Sequence optimized)
+            if config.DEBUG:
+                print("\nBoard State:")
+                print(board)
+                vis = visualize_detection(frame, board, pieces)
+                cv2.imshow("Bot Vision", vis)
+                cv2.waitKey(1)
+                
             move = best_move(board, pieces)
             
             if move is None:
