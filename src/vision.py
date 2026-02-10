@@ -118,66 +118,75 @@ def read_pieces(frame: np.ndarray) -> List[Piece]:
 
 def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
-    Detect the piece shape by sampling a 5x5 grid within the slot.
-    This is much more robust than contour detection for Block Blast.
+    Detect the piece shape by finding its bounding box and sampling a relative grid.
+    This handles cases where the game auto-centers pieces in the tray.
     """
     if piece_region.size == 0:
         return None
     
-    h, w = piece_region.shape[:2]
-    cell_w = w / 5.0
-    cell_h = h / 5.0
-    
-    # Grid to store filled cells
-    grid = np.zeros((5, 5), dtype=np.uint8)
-    
     # HSV for vibrancy check
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     
-    found_any = False
-    for r in range(5):
-        for c in range(5):
-            # Calculate cell boundaries
-            y1, y2 = int(r * cell_h), int((r + 1) * cell_h)
-            x1, x2 = int(c * cell_w), int((c + 1) * cell_w)
-            
-            # Sample the central patch of the cell (avoid borders)
-            margin_h = int((y2 - y1) * 0.25)
-            margin_w = int((x2 - x1) * 0.25)
-            patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-            
-            if patch.size == 0:
-                continue
-                
-            # Classify vibrancy (Pieces are VERY saturated and bright)
-            avg_sat = np.mean(patch[:, :, 1])
-            avg_val = np.mean(patch[:, :, 2])
-            
-            # Use thresholds from config
-            if avg_sat > config.VISION_SAT_THRESHOLD and avg_val > config.VISION_VAL_THRESHOLD:
-                grid[r, c] = 1
-                found_any = True
-            elif config.DEBUG and r == 2 and c == 2:
-                # Log one cell to help user tune thresholds if it still fails
-                print(f"    Slot {r},{c} Sample: Sat={avg_sat:.1f}, Val={avg_val:.1f} (Target: >{config.VISION_SAT_THRESHOLD}, >{config.VISION_VAL_THRESHOLD})")
-                
-    if not found_any:
+    # Create mask of vibrant pixels
+    lower = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper = np.array([180, 255, 255])
+    mask = cv2.inRange(hsv, lower, upper)
+    
+    # Clean noise
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    
+    # Find bounding box of the piece
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return None
         
-    # Crop the 5x5 grid to the minimal bounding box of the piece
-    rows, cols = np.where(grid == 1)
-    min_r, max_r = np.min(rows), np.max(rows)
-    min_c, max_c = np.min(cols), np.max(cols)
+    largest_contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(largest_contour) < 50: # Ignore tiny noise
+        return None
+        
+    bx, by, bw, bh = cv2.boundingRect(largest_contour)
     
-    mask_cropped = grid[min_r:max_r+1, min_c:max_c+1]
+    # Infer grid dimensions
+    # A single unit is approx 1/5th of the tray width (slot is 200px, unit ~40px)
+    slot_w = piece_region.shape[1]
+    unit_size = slot_w / 5.0
     
+    cols = int(round(bw / unit_size))
+    rows = int(round(bh / unit_size))
+    
+    # Clamp 1-5
+    cols = max(1, min(5, cols))
+    rows = max(1, min(5, rows))
+    
+    # Now sample a grid WITHIN the bounding box (bx, by, bw, bh)
+    grid = np.zeros((rows, cols), dtype=np.uint8)
+    
+    sub_w = bw / float(cols)
+    sub_h = bh / float(rows)
+    
+    for r in range(rows):
+        for c in range(cols):
+            # Calculate sub-cell boundaries relative to piece_region
+            y1 = by + int(r * sub_h)
+            y2 = by + int((r + 1) * sub_h)
+            x1 = bx + int(c * sub_w)
+            x2 = bx + int((c + 1) * sub_w)
+            
+            # Sample center patch of this sub-cell
+            margin_h = max(1, int((y2 - y1) * 0.2))
+            margin_w = max(1, int((x2 - x1) * 0.2))
+            patch = mask[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+            
+            if patch.size > 0 and np.mean(patch) > 127:
+                grid[r, c] = 1
+                
     if config.DEBUG:
-        print(f"  Grid Detected: {mask_cropped.shape[0]}x{mask_cropped.shape[1]}")
-        # Print a small representation of the grid
-        for row in mask_cropped:
+        print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Inferred Grid: {rows}x{cols}")
+        for row in grid:
             print("  " + "".join(["#" if x else "." for x in row]))
             
-    return mask_cropped
+    return grid
 
 
 def load_piece_templates() -> dict:
@@ -283,45 +292,58 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                 y = y1 + row * config.CELL_HEIGHT + config.CELL_HEIGHT // 2
                 cv2.circle(vis, (x, y), 5, (0, 0, 255), -1)
     
-    # Draw piece slots and their internal 5x5 sampling grids
-    for slot in config.PIECE_SLOTS:
-        cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 2)
-        
-        # Draw 5x5 sampling grid inside the slot
-        cell_w = slot.width / 5.0
-        cell_h = slot.height / 5.0
-        for r in range(6):
-            y = int(slot.y + r * cell_h)
-            cv2.line(vis, (slot.x, y), (slot.x + slot.width, y), (100, 100, 100), 1)
-        for c in range(6):
-            x = int(slot.x + c * cell_w)
-            cv2.line(vis, (x, slot.y), (x, slot.y + slot.height), (100, 100, 100), 1)
-            
-    # Mark detected piece cells in the visualization
-    # We re-run a simplified version of the logic to draw dots in the vision window
+    # Draw piece slots and their internal relative grids
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
+        cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
+        
+        # Determine the piece's actual boundaries for overlay
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
-        cell_w = slot.width / 5.0
-        cell_h = slot.height / 5.0
-        for r in range(5):
-            for c in range(5):
-                y1, y2 = int(r * cell_h), int((r + 1) * cell_h)
-                x1, x2 = int(c * cell_w), int((c + 1) * cell_w)
-                margin_h, margin_w = int((y2 - y1) * 0.25), int((x2 - x1) * 0.25)
-                patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-                if patch.size > 0:
-                    avg_sat = np.mean(patch[:, :, 1])
-                    avg_val = np.mean(patch[:, :, 2])
-                    if avg_sat > config.VISION_SAT_THRESHOLD and avg_val > config.VISION_VAL_THRESHOLD:
-                        # Draw a small red indicator for detected cell
-                        cx = int(slot.x + c * cell_w + cell_w // 2)
-                        cy = int(slot.y + r * cell_h + cell_h // 2)
-                        cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-                        # Highlight the sampling area
-                        cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
-                                      (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
+        lower = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+        upper = np.array([180, 255, 255])
+        mask = cv2.inRange(hsv, lower, upper)
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours: continue
+        largest_contour = max(contours, key=cv2.contourArea)
+        if cv2.contourArea(largest_contour) < 50: continue
+        
+        bx, by, bw, bh = cv2.boundingRect(largest_contour)
+        
+        # Infer dimensions for visualization (same as detection logic)
+        unit_size = slot.width / 5.0
+        cols = max(1, min(5, int(round(bw / unit_size))))
+        rows = max(1, min(5, int(round(bh / unit_size))))
+        
+        sub_w = bw / float(cols)
+        sub_h = bh / float(rows)
+        
+        # Draw the relative grid
+        for r in range(rows + 1):
+            py = slot.y + by + int(r * sub_h)
+            cv2.line(vis, (slot.x + bx, py), (slot.x + bx + bw, py), (100, 100, 100), 1)
+        for c in range(cols + 1):
+            px = slot.x + bx + int(c * sub_w)
+            cv2.line(vis, (px, slot.y + by), (px, slot.y + by + bh), (100, 100, 100), 1)
+            
+        # Highlight detected cells
+        for r in range(rows):
+            for c in range(cols):
+                y1 = by + int(r * sub_h)
+                y2 = by + int((r + 1) * sub_h)
+                x1 = bx + int(c * sub_w)
+                x2 = bx + int((c + 1) * sub_w)
+                margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
+                patch = mask[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+                if patch.size > 0 and np.mean(patch) > 127:
+                    cx = int(slot.x + bx + c * sub_w + sub_w // 2)
+                    cy = int(slot.y + by + r * sub_h + sub_h // 2)
+                    cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
+                    cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
+                                  (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
     
     return vis
 
