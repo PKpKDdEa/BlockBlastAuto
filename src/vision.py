@@ -14,6 +14,7 @@ class TemplateManager:
     def __init__(self, templates_path: str = "data/templates.json"):
         self.templates_path = templates_path
         self.templates: List[np.ndarray] = []
+        self.data: Dict = {}
         self._load_templates()
         
     def _load_templates(self):
@@ -22,15 +23,16 @@ class TemplateManager:
             os.makedirs(os.path.dirname(self.templates_path), exist_ok=True)
             with open(self.templates_path, 'w') as f:
                 json.dump({}, f)
+                self.data = {}
             return
             
         try:
             with open(self.templates_path, 'r') as f:
-                data = json.load(f)
+                self.data = json.load(f)
                 
             self.templates = []
             # Flatten the nested structure (categories -> names -> grids)
-            for category in data.values():
+            for category in self.data.values():
                 for grid_list in category.values():
                     self.templates.append(np.array(grid_list, dtype=np.uint8))
         except Exception as e:
@@ -49,38 +51,31 @@ class TemplateManager:
         best_score = 0.0
         best_name = "unknown"
         
-        for template in self.templates:
-            # Jaccard Similarity: Intersection over Union
-            int_sum = np.logical_and(grid, template).sum()
-            uni_sum = np.logical_or(grid, template).sum()
-            
-            if uni_sum == 0: continue
-            score = int_sum / float(uni_sum)
-            
-            if score > best_score:
-                best_score = score
-                best_match = template
+        for category, pieces in self.data.items():
+            for name, grid_list in pieces.items():
+                template = np.array(grid_list, dtype=np.uint8)
+                # Jaccard Similarity: Intersection over Union
+                int_sum = np.logical_and(grid, template).sum()
+                uni_sum = np.logical_or(grid, template).sum()
+                
+                if uni_sum == 0: continue
+                score = int_sum / float(uni_sum)
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = template
+                    best_name = f"{category}/{name}"
                 
         # 1. High Confidence SNAPPING
         if best_match is not None and best_score >= threshold:
-            if config.DEBUG and best_score < 1.0:
-                print(f"  Snapped: Similarity {best_score:.2f}")
-            return best_match
+            return best_match, best_score, best_name
             
         # 2. NOISE FILTERING
-        # If it doesn't match anything and has > 12 blocks, it's almost certainly noise (tray background)
-        # Most complex pieces in Block Blast (like the 3x3 square or 3x3 corner) are <= 9 blocks.
         block_count = np.sum(grid)
         if best_score < 0.3 and block_count > 12:
-            if config.DEBUG:
-                print(f"  REJECTED: No template match (best: {best_score:.2f}) and too many blocks ({block_count})")
-            return np.zeros((5, 5), dtype=np.uint8)
+            return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise"
             
-        # 3. UNKNOWN PIECE (Potential for learning)
-        if config.DEBUG and block_count > 0:
-            print(f"  Unknown piece detected (best match: {best_score:.2f}, blocks: {block_count})")
-            
-        return grid
+        return grid, best_score, "new-pattern" if block_count > 0 else "empty"
         
     def learn_pattern(self, grid: np.ndarray):
         """Save a new verified pattern to the library."""
@@ -251,6 +246,25 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     Detect the piece shape by finding its bounding box and sampling a relative grid.
     This handles cases where the game auto-centers pieces in the tray.
     """
+    grid_5x5 = get_piece_grid(piece_region)
+    if grid_5x5 is None:
+        return None
+        
+    # SNAPPING: Use template manager to clean up the detection
+    final_grid, score, name = template_manager.match_and_snap(grid_5x5)
+    
+    if config.DEBUG and np.sum(final_grid) > 0:
+        print(f"  Grid Detected (Match: {name}@{score:.2f})")
+        for row in final_grid:
+            print("  " + "".join(["#" if x else "." for x in row]))
+            
+    return final_grid
+
+
+def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
+    """
+    Extract a raw 5x5 binary grid from a piece slot region.
+    """
     if piece_region.size == 0:
         return None
     
@@ -267,7 +281,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
         
     piece_points = []
     for cnt in contours:
-        if cv2.contourArea(cnt) > 40: # Threshold for a unit block segment
+        if cv2.contourArea(cnt) > 40:
             piece_points.append(cnt)
             
     if not piece_points:
@@ -277,48 +291,27 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     bx, by, bw, bh = cv2.boundingRect(all_points)
     
     # Infer grid dimensions
-    # A single unit block is always approximately 40-42 pixels in a standardized 720/1080p tray
-    # Better to infer from the slot_w which we know is calibrated to hold 5 units.
-    # If slot_w is 250, unit_size = slot_w / 5.0 = 50. 
-    # BUT the pieces aren't actually 250px wide. 
-    # Let's use a more robust way: unit_size is derived from the fact that 5 units = ~200px.
-    # Since we expanded the slot to 250, let's just use slot_w / 5.0 but clamp it or use a constant.
     unit_size = 40.0 # Standard block size in tray
-    
-    cols = int(round(bw / unit_size))
-    rows = int(round(bh / unit_size))
-    
-    # Clamp 1-5
-    cols = max(1, min(5, cols))
-    rows = max(1, min(5, rows))
+    cols = max(1, min(5, int(round(bw / unit_size))))
+    rows = max(1, min(5, int(round(bh / unit_size))))
     
     # Now sample a grid WITHIN the bounding box (bx, by, bw, bh)
     grid = np.zeros((rows, cols), dtype=np.uint8)
-    
-    sub_w = bw / float(cols)
-    sub_h = bh / float(rows)
+    sub_w, sub_h = bw / float(cols), bh / float(rows)
     
     for r in range(rows):
         for c in range(cols):
-            # Calculate sub-cell boundaries relative to piece_region
-            y1 = by + int(r * sub_h)
-            y2 = by + int((r + 1) * sub_h)
-            x1 = bx + int(c * sub_w)
-            x2 = bx + int((c + 1) * sub_w)
+            y1, y2 = by + int(r * sub_h), by + int((r + 1) * sub_h)
+            x1, x2 = bx + int(c * sub_w), bx + int((c + 1) * sub_w)
             
-            # Sample center patch of this sub-cell
-            margin_h = max(1, int((y2 - y1) * 0.2))
-            margin_w = max(1, int((x2 - x1) * 0.2))
-            
-            # Use the same two-stage logic to decide if individual cell is filled
+            margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
             hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+            
             if hsv_patch.size > 0:
-                avg_h = np.mean(hsv_patch[:, :, 0])
-                avg_s = np.mean(hsv_patch[:, :, 1])
-                avg_v = np.mean(hsv_patch[:, :, 2])
+                avg_h, avg_s, avg_v = np.mean(hsv_patch[:, :, 0]), np.mean(hsv_patch[:, :, 1]), np.mean(hsv_patch[:, :, 2])
                 
                 is_filled = False
-                if avg_s > 150 and avg_v > 80: # Absolute vibrancy pass (Stage 1)
+                if avg_s > 180 and avg_v > 80: # Absolute vibrancy pass (Stage 1)
                     is_filled = True
                 elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
                      (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
@@ -326,31 +319,13 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 
                 if is_filled:
                     grid[r, c] = 1
-                elif config.DEBUG:
-                    print(f"    Block at ({r},{c}) failed: Hue={avg_h:.0f}, Sat={avg_s:.1f}, Val={avg_v:.1f}")
 
     # Create a standardized 5x5 grid and center the detected piece within it
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
-    
-    # Calculate start positions to center the (rows x cols) piece in (5 x 5)
-    # This follows standard Block Blast centering (Width 1=index 2, Width 2=index 1)
-    start_row = (5 - rows) // 2
-    start_col = (5 - cols) // 2
-    
-    # Slice the sampled piece into the 5x5 grid
+    start_row, start_col = (5 - rows) // 2, (5 - cols) // 2
     grid_5x5[start_row : start_row + rows, start_col : start_col + cols] = grid
     
-    raw_blocks = np.sum(grid_5x5)
-    
-    # SNAPPING: Use template manager to clean up the detection
-    final_grid = template_manager.match_and_snap(grid_5x5)
-    
-    if config.DEBUG:
-        print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Grid Detected: {rows}x{cols} (Centered in 5x5)")
-        for row in final_grid:
-            print("  " + "".join(["#" if x else "." for x in row]))
-            
-    return final_grid
+    return grid_5x5
 
 
 def load_piece_templates() -> dict:
@@ -530,6 +505,13 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                         # Highlighting Box (Green)
                         cv2.rectangle(vis, (int(slot.x + x1 + margin_w), int(slot.y + y1 + margin_h)), 
                                       (int(slot.x + x2 - margin_w), int(slot.y + y2 - margin_h)), (0, 255, 0), 1)
+
+        # 3. Label Piece Identity and Match Score
+        final_5x5, score, name = template_manager.match_and_snap(get_piece_grid(frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]))
+        if name != "empty" and name != "noise":
+            label = f"{name} ({score:.2f})"
+            color = (0, 255, 0) if score > 0.9 else (0, 255, 255) if score > 0.7 else (0, 165, 255)
+            cv2.putText(vis, label, (slot.x, slot.y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
     
     return vis
 
