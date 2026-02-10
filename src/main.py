@@ -104,11 +104,26 @@ def main():
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
                 click_xy = (end_xy[0], end_xy[1] + current_offset)
                 
-                vis_drag = visualize_drag(frame, move, start_xy, click_xy)
-                cv2.imshow("Bot Vision", vis_drag)
-                cv2.waitKey(500) # Show target for 500ms
-                
             drag_piece(piece, move.row, move.col)
+            
+            # Verification: Check if piece actually landed
+            time.sleep(1.0) # Wait for animation to finish
+            frame_after = capture.capture_frame()
+            board_after = read_board(frame_after)
+            
+            # Check the cells where the piece should be
+            missed = False
+            for dr, dc in piece.cells:
+                r, c = move.row + dr, move.col + dc
+                if r < 8 and c < 8 and board_after.grid[r, c] == 0:
+                    missed = True
+                    break
+            
+            if missed:
+                print(f"  [!!!] PLACEMENT FAILURE: Piece {move.piece_index} missed ({move.row}, {move.col})")
+                print(f"        Action: Adjust DRAG_OFFSET_Y values in config.py")
+            else:
+                print(f"  [OK] Piece {move.piece_index} placed successfully at ({move.row}, {move.col})")
             
             move_count += 1
             

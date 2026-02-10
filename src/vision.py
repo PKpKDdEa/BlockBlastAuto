@@ -156,9 +156,13 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     bx, by, bw, bh = cv2.boundingRect(all_points)
     
     # Infer grid dimensions
-    # A single unit is approx 1/5th of the tray width (slot is 200px, unit ~40px)
-    slot_w = piece_region.shape[1]
-    unit_size = slot_w / 5.0
+    # A single unit block is always approximately 40-42 pixels in a standardized 720/1080p tray
+    # Better to infer from the slot_w which we know is calibrated to hold 5 units.
+    # If slot_w is 250, unit_size = slot_w / 5.0 = 50. 
+    # BUT the pieces aren't actually 250px wide. 
+    # Let's use a more robust way: unit_size is derived from the fact that 5 units = ~200px.
+    # Since we expanded the slot to 250, let's just use slot_w / 5.0 but clamp it or use a constant.
+    unit_size = 40.0 # Standard block size in tray
     
     cols = int(round(bw / unit_size))
     rows = int(round(bh / unit_size))
@@ -186,8 +190,18 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
             margin_w = max(1, int((x2 - x1) * 0.2))
             patch = mask[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
             
-            if patch.size > 0 and np.mean(patch) > 127:
-                grid[r, c] = 1
+            if patch.size > 0:
+                avg_sat = np.mean(patch) # This is WRONG, patch is from 'mask' (binary)
+                # Wait, 'patch' was defined as mask[...].
+                # Let's use the actual HSV patch for diagnostics
+                hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+                avg_sat = np.mean(hsv_patch[:, :, 1])
+                avg_val = np.mean(hsv_patch[:, :, 2])
+                
+                if avg_sat > config.VISION_SAT_THRESHOLD and avg_val > config.VISION_VAL_THRESHOLD:
+                    grid[r, c] = 1
+                elif config.DEBUG:
+                    print(f"    Block at ({r},{c}) failed: Sat={avg_sat:.1f}, Val={avg_val:.1f} (Needs >{config.VISION_SAT_THRESHOLD}, >{config.VISION_VAL_THRESHOLD})")
                 
     if config.DEBUG:
         print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Inferred Grid: {rows}x{cols}")

@@ -218,5 +218,16 @@
             "WEIGHT_NEAR_COMPLETE": 3.1931395741873114,
             "WEIGHT_STREAK_BONUS": 18.112857273473566
         }
+    },
+    {
+        "score": 0,
+        "moves": 34,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.8966481897790735,
+            "WEIGHT_HOLES_PENALTY": -15.143203660649792,
+            "WEIGHT_BUMPINESS": -0.5047844141004403,
+            "WEIGHT_NEAR_COMPLETE": 3.1933641965498234,
+            "WEIGHT_STREAK_BONUS": 18.059745727725634
+        }
     }
 ]
