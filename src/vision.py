@@ -139,41 +139,40 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     lower_bound = np.array([0, 50, 50])  
     upper_bound = np.array([180, 255, 255])
     
-    mask = cv2.inRange(hsv, lower_bound, upper_bound)
-    
-    # Clean up mask (remove noise, fill small holes)
+    # Morphological clean up
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel) # Remove noise
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel) # Fill gaps
     
-    # Find bounding box and crop
-    y_idx, x_idx = np.where(mask > 0)
-    if len(y_idx) == 0:
+    # Use contours to isolate the piece and ignore slot borders/noise
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
         return None
+        
+    # Find bounding box of the piece (all contours combined)
+    all_points = np.concatenate(contours)
+    x, y, w, h = cv2.boundingRect(all_points)
     
-    y_min, y_max = np.min(y_idx), np.max(y_idx)
-    x_min, x_max = np.min(x_idx), np.max(x_idx)
+    # Extra safety: crop must be at least a few pixels
+    if w < 5 or h < 5:
+        return None
+        
+    mask_cropped = mask[y:y+h, x:x+w]
     
-    # Add small padding
-    pad = 2
-    y_min = max(0, y_min - pad)
-    y_max = min(mask.shape[0]-1, y_max + pad)
-    x_min = max(0, x_min - pad)
-    x_max = min(mask.shape[1]-1, x_max + pad)
-    
-    mask_cropped = mask[y_min:y_max+1, x_min:x_max+1]
-    
-    # Estimate grid dimensions based on actual pixel size relative to slot size
-    # Assuming a 5x5 grid fits in the 200x200 slot, each cell is ~40px.
-    # We use the slot dimensions to be resolution-independent.
-    slot_w, slot_h = piece_region.shape[1], piece_region.shape[0]
+    # Estimate grid dimensions based on pixel size relative to slot size
+    # In Block Blast, a 1-unit block is roughly 1/5 of the tray slot dimension.
+    slot_w = piece_region.shape[1]
     cell_size = slot_w / 5.0
     
-    cols = max(1, int(round(mask_cropped.shape[1] / cell_size)))
-    rows = max(1, int(round(mask_cropped.shape[0] / cell_size)))
+    cols = max(1, int(round(w / cell_size)))
+    rows = max(1, int(round(h / cell_size)))
     
-    # Cap dimensions to common game limits (usually max 5x5)
+    # Cap to 5x5
     cols = min(5, cols)
     rows = min(5, rows)
+    
+    if config.DEBUG:
+        print(f"  Slot Region: {piece_region.shape}, Mask BBox: ({x},{y},{w},{h}), Inferred: {rows}x{cols}")
     
     # Resize to the inferred grid dimensions
     mask_resized = cv2.resize(mask_cropped, (cols, rows), interpolation=cv2.INTER_NEAREST)
