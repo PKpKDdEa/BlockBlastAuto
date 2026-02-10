@@ -128,6 +128,14 @@ def main():
                 print(f"        Action: Adjust DRAG_OFFSET_Y values in config.py")
             else:
                 print(f"  [OK] Piece {move.piece_index} placed successfully at ({move.row}, {move.col})")
+                
+                # Feedback Loop: Confirm this pattern is valid and learn it
+                from vision import template_manager
+                # We need the relative 5x5 which we used for detection. 
+                # Piece.from_mask already trimmed it, but let's re-save if we have the mask context.
+                # For now, let's look back at how we detected it.
+                if hasattr(piece, 'raw_mask') and piece.raw_mask is not None:
+                    template_manager.learn_pattern(piece.raw_mask)
             
             move_count += 1
             

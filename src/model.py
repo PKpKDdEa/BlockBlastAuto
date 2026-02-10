@@ -14,6 +14,7 @@ class Piece:
     cells: List[Tuple[int, int]]  # List of (row, col) offsets from anchor
     width: int
     height: int
+    raw_mask: Optional[np.ndarray] = None # Original 5x5 detection for learning
     
     @classmethod
     def from_mask(cls, piece_id: int, mask: np.ndarray) -> 'Piece':
@@ -21,9 +22,11 @@ class Piece:
         Create piece from binary mask. Automatically trims empty space
         to keep piece offsets relative to its own top-left.
         """
+        raw_mask = mask.copy() if mask.shape == (5, 5) else None
+        
         rows, cols = np.where(mask == 1)
         if len(rows) == 0:
-            return cls(id=piece_id, cells=[], width=0, height=0)
+            return cls(id=piece_id, cells=[], width=0, height=0, raw_mask=raw_mask)
             
         min_r, max_r = np.min(rows), np.max(rows)
         min_c, max_c = np.min(cols), np.max(cols)
@@ -35,7 +38,7 @@ class Piece:
         height = int(max_r - min_r + 1)
         width = int(max_c - min_c + 1)
         
-        return cls(id=piece_id, cells=cells, width=width, height=height)
+        return cls(id=piece_id, cells=cells, width=width, height=height, raw_mask=raw_mask)
     
     @property
     def anchor_offset(self) -> Tuple[float, float]:

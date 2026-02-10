@@ -1,12 +1,104 @@
 """
 Computer vision module for detecting board state and pieces.
 """
-import cv2
-import numpy as np
-import time
-from typing import List, Tuple, Optional
+import json
+import os
+from typing import List, Tuple, Optional, Dict
 from config import config
 from model import Board, Piece, Move
+
+
+class TemplateManager:
+    """Manages valid piece patterns and provides snapping/learning logic."""
+    
+    def __init__(self, templates_path: str = "data/templates.json"):
+        self.templates_path = templates_path
+        self.templates: List[np.ndarray] = []
+        self._load_templates()
+        
+    def _load_templates(self):
+        """Load templates from JSON into numpy arrays."""
+        if not os.path.exists(self.templates_path):
+            os.makedirs(os.path.dirname(self.templates_path), exist_ok=True)
+            with open(self.templates_path, 'w') as f:
+                json.dump({}, f)
+            return
+            
+        try:
+            with open(self.templates_path, 'r') as f:
+                data = json.load(f)
+                
+            self.templates = []
+            # Flatten the nested structure (categories -> names -> grids)
+            for category in data.values():
+                for grid_list in category.values():
+                    self.templates.append(np.array(grid_list, dtype=np.uint8))
+        except Exception as e:
+            if config.DEBUG:
+                print(f"Error loading templates: {e}")
+                
+    def match_and_snap(self, grid: np.ndarray, threshold: float = 0.8) -> np.ndarray:
+        """
+        Compare input grid against library and snap to the best match.
+        If no match is good enough, returns the original grid.
+        """
+        if len(self.templates) == 0:
+            return grid
+            
+        best_match = None
+        best_score = 0.0
+        
+        for template in self.templates:
+            # Jaccard Similarity: Intersection over Union
+            intersection = np.logical_and(grid, template).sum()
+            union = np.logical_or(grid, template).sum()
+            
+            if union == 0: continue
+            score = intersection / float(union)
+            
+            if score > best_score:
+                best_score = score
+                best_match = template
+                
+        if best_match is not None and best_score >= threshold:
+            if config.DEBUG and best_score < 1.0:
+                print(f"  Snapped noisy detection to template (Score: {best_score:.2f})")
+            return best_match
+            
+        return grid
+        
+    def learn_pattern(self, grid: np.ndarray):
+        """Save a new verified pattern to the library."""
+        # Check if we already have it
+        if any(np.array_equal(grid, t) for t in self.templates):
+            return
+            
+        self.templates.append(grid)
+        
+        # Save back to file (simple append to a 'learned' category)
+        try:
+            data = {}
+            if os.path.exists(self.templates_path):
+                with open(self.templates_path, 'r') as f:
+                    data = json.load(f)
+            
+            if "learned" not in data:
+                data["learned"] = {}
+                
+            pattern_id = f"pattern_{len(data['learned']) + 1}"
+            data["learned"][pattern_id] = grid.tolist()
+            
+            with open(self.templates_path, 'w') as f:
+                json.dump(data, f, indent=2)
+                
+            if config.DEBUG:
+                print(f"LEARNED new piece pattern: {pattern_id}")
+        except Exception as e:
+            if config.DEBUG:
+                print(f"Error saving learned template: {e}")
+
+# Global instance
+template_manager = TemplateManager()
 
 
 def read_board(frame: np.ndarray) -> Board:
@@ -233,12 +325,15 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Slice the sampled piece into the 5x5 grid
     grid_5x5[start_row : start_row + rows, start_col : start_col + cols] = grid
     
+    # SNAPPING: Use template manager to clean up the detection
+    final_grid = template_manager.match_and_snap(grid_5x5)
+    
     if config.DEBUG:
         print(f"  Piece BBox: ({bx},{by},{bw},{bh}), Grid Detected: {rows}x{cols} (Centered in 5x5)")
-        for row in grid_5x5:
+        for row in final_grid:
             print("  " + "".join(["#" if x else "." for x in row]))
             
-    return grid_5x5
+    return final_grid
 
 
 def load_piece_templates() -> dict:
