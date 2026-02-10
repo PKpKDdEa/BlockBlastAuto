@@ -355,8 +355,6 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         
         # Use unified mask
         mask = get_piece_vibrancy_mask(hsv)
-        # Bridge gaps
-        mask = cv2.dilate(mask, kernel, iterations=1)
         
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: continue
