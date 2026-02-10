@@ -72,7 +72,7 @@ class Config:
     
     # Vision Throttles (Aggressive Sensitivity)
     VISION_SAT_THRESHOLD: int = 100
-    VISION_VAL_THRESHOLD: int = 100
+    VISION_VAL_THRESHOLD: int = 80
     # Exclude Tray Blue-Gray Only if Saturation is low
     VISION_EXCLUDE_HUE_MIN: int = 80
     VISION_EXCLUDE_HUE_MAX: int = 150

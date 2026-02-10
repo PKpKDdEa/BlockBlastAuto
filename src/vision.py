@@ -84,33 +84,56 @@ def classify_cell(patch: np.ndarray) -> bool:
     return is_filled
 
 
+def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
+    """
+    Unified vibrancy-aware mask for pieces. 
+    Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
+    """
+    # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
+    # Background tray is usually saturation < 120. Pieces are high.
+    lower_vibrant = np.array([0, 150, 80])
+    upper_vibrant = np.array([180, 255, 255])
+    mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
+    
+    # Stage 2: Color Selective (Catches Red, Green, etc. while avoiding Tray Blue)
+    lower_r1 = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
+    
+    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    upper_r2 = np.array([180, 255, 255])
+    
+    mask_r1 = cv2.inRange(hsv_img, lower_r1, upper_r1)
+    mask_r2 = cv2.inRange(hsv_img, lower_r2, upper_r2)
+    
+    # Combine masks
+    mask = cv2.bitwise_or(mask_vibrant, mask_r1)
+    mask = cv2.bitwise_or(mask, mask_r2)
+    
+    # Cleanup noise
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    # Dilate slightly to bridge beveled edges
+    mask = cv2.dilate(mask, kernel, iterations=1)
+    
+    return mask
+
+
 def read_pieces(frame: np.ndarray) -> List[Piece]:
     """
     Detect available pieces from piece slots.
-    
-    Args:
-        frame: BGR image of game window
-    
-    Returns:
-        List of detected pieces (up to 3)
     """
     pieces = []
     
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
-        # Extract piece slot region
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
-        
-        # Detect piece mask
         mask = detect_piece_mask(piece_region)
         
         if mask is not None and np.sum(mask) > 0:
-            # Create piece from mask
             piece = Piece.from_mask(piece_id=slot_idx, mask=mask)
             pieces.append(piece)
             if config.DEBUG:
                 print(f"Piece {slot_idx} detected: {piece.width}x{piece.height}")
         else:
-            # Empty slot
             pieces.append(None)
     
     return pieces
@@ -127,36 +150,8 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # HSV for vibrancy check
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     
-    # Create mask using two-stage logic for better blue-on-blue separation
-    
-    # Stage 1: Absolute Vibrancy (Catches any very bright/vibrant block, even Blue/Cyan)
-    # Background tray is usually saturation < 150. Pieces are high.
-    # Lowered slightly to 180 to be more inclusive.
-    lower_vibrant = np.array([0, 180, 150])
-    upper_vibrant = np.array([180, 255, 255])
-    mask_vibrant = cv2.inRange(hsv, lower_vibrant, upper_vibrant)
-    
-    # Stage 2: Color Selective (Catches Red, Green, etc. while avoiding Tray Blue)
-    # We use two ranges to carve out the background blue hue
-    lower_r1 = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
-    upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
-    
-    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
-    upper_r2 = np.array([180, 255, 255])
-    
-    mask_r1 = cv2.inRange(hsv, lower_r1, upper_r1)
-    mask_r2 = cv2.inRange(hsv, lower_r2, upper_r2)
-    
-    # Combine: (Extremely Vibrant) OR (Correct Color and Medium Vibrancy)
-    mask = cv2.bitwise_or(mask_vibrant, mask_r1)
-    mask = cv2.bitwise_or(mask, mask_r2)
-    
-    # Clean noise
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    
-    # Bridge small gaps between blocks
-    mask = cv2.dilate(mask, kernel, iterations=1)
+    # Use unified mask logic
+    mask = get_piece_vibrancy_mask(hsv)
     
     # Find bounding box of the piece (all significant contours combined)
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -216,7 +211,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 avg_v = np.mean(hsv_patch[:, :, 2])
                 
                 is_filled = False
-                if avg_s > 180 and avg_v > 150: # Absolute vibrancy pass (Stage 1)
+                if avg_s > 150 and avg_v > 80: # Absolute vibrancy pass (Stage 1)
                     is_filled = True
                 elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
                      (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
@@ -358,18 +353,8 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         if piece_region.size == 0: continue
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
         
-        # Two-stage mask for visualization
-        lower_vibrant = np.array([0, 180, 150])
-        upper_vibrant = np.array([180, 255, 255])
-        mask_vibrant = cv2.inRange(hsv, lower_vibrant, upper_vibrant)
-        mask_r1 = cv2.inRange(hsv, np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD]), 
-                                     np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255]))
-        mask_r2 = cv2.inRange(hsv, np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD]), 
-                                     np.array([180, 255, 255]))
-        mask = cv2.bitwise_or(mask_vibrant, mask_r1)
-        mask = cv2.bitwise_or(mask, mask_r2)
-        
-        kernel = np.ones((3, 3), np.uint8)
+        # Use unified mask
+        mask = get_piece_vibrancy_mask(hsv)
         # Bridge gaps
         mask = cv2.dilate(mask, kernel, iterations=1)
         
@@ -392,55 +377,49 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         rows = max(1, min(5, int(round(bh / unit_size))))
         
         # Sub-cell dimensions
+        # Sub-cell dimensions
         sub_w = bw / float(cols)
         sub_h = bh / float(rows)
         
         # Center the 5x5 grid on the piece BBox
-        # This matches the detection centering
         start_row = (5 - rows) // 2
         start_col = (5 - cols) // 2
         
-        # Draw the 5x5 background grid (Standardized)
-        for r in range(6): # 5 cells = 6 lines
-            # Adjust pixel Position to match the centered grid logic
-            # The piece top is 'by', but in 5x5 it's at 'start_row'
-            py = slot.y + by - (start_row * sub_h) + (r * sub_h)
-            cv2.line(vis, (int(slot.x + bx - start_col * sub_w), int(py)), 
-                          (int(slot.x + bx + (5 - start_col) * sub_w), int(py)), (80, 80, 80), 1)
+        # 1. Draw Standardized 5x5 Background Grid
+        grid_x0 = int(slot.x + bx - start_col * sub_w)
+        grid_y0 = int(slot.y + by - start_row * sub_h)
+        for r in range(6):
+            py = int(grid_y0 + r * sub_h)
+            cv2.line(vis, (grid_x0, py), (int(grid_x0 + 5 * sub_w), py), (70, 70, 70), 1)
         for c in range(6):
-            px = slot.x + bx - (start_col * sub_w) + (c * sub_w)
-            cv2.line(vis, (int(px), int(slot.y + by - start_row * sub_h)), 
-                          (int(px), int(slot.y + by + (5 - start_row) * sub_h)), (80, 80, 80), 1)
+            px = int(grid_x0 + c * sub_w)
+            cv2.line(vis, (px, grid_y0), (px, int(grid_y0 + 5 * sub_h)), (70, 70, 70), 1)
             
-        # Highlight detected cells (Still relative to the piece)
+        # 2. Highlight Detected Cells
         for r in range(rows):
             for c in range(cols):
-                y1 = by + int(r * sub_h)
-                y2 = by + int((r + 1) * sub_h)
-                x1 = bx + int(c * sub_w)
-                x2 = bx + int((c + 1) * sub_w)
+                y1, y2 = by + int(r * sub_h), by + int((r + 1) * sub_h)
+                x1, x2 = bx + int(c * sub_w), bx + int((c + 1) * sub_w)
                 margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
                 
                 hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
                 if hsv_patch.size > 0:
-                    avg_h = np.mean(hsv_patch[:, :, 0])
-                    avg_s = np.mean(hsv_patch[:, :, 1])
-                    avg_v = np.mean(hsv_patch[:, :, 2])
+                    avg_h, avg_s, avg_v = np.mean(hsv_patch[:, :, 0]), np.mean(hsv_patch[:, :, 1]), np.mean(hsv_patch[:, :, 2])
                     
                     is_filled = False
-                    if avg_s > 180 and avg_v > 150:
+                    if avg_s > 150 and avg_v > 80:
                         is_filled = True
                     elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
                          (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
                         is_filled = True
                         
                     if is_filled:
-                        cx = int(slot.x + bx + c * sub_w + sub_w // 2)
-                        cy = int(slot.y + by + r * sub_h + sub_h // 2)
+                        # Draw detection markers perfectly center-aligned
+                        cx, cy = int(slot.x + x1 + sub_w / 2), int(slot.y + y1 + sub_h / 2)
                         cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-                        # Highlight the sampling area (Green Box)
-                        cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
-                                      (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
+                        # Highlighting Box (Green)
+                        cv2.rectangle(vis, (int(slot.x + x1 + margin_w), int(slot.y + y1 + margin_h)), 
+                                      (int(slot.x + x2 - margin_w), int(slot.y + y2 - margin_h)), (0, 255, 0), 1)
     
     return vis
 
