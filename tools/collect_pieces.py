@@ -4,6 +4,11 @@ Tool for collecting and saving piece templates.
 import cv2
 import numpy as np
 import os
+import sys
+
+# Add src to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+
 from window_capture import WindowCapture
 from vision import detect_piece_mask
 from config import config

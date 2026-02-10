@@ -1,6 +1,8 @@
+import numpy as np
+import itertools
+from typing import List, Tuple, Optional
 from model import Board, Piece, Move, is_legal, apply_move
 from config import config
-import numpy as np
 
 def evaluate_board(board: Board) -> float:
     """

@@ -3,6 +3,12 @@ Unit tests for game model (Board, Piece, Move).
 """
 import pytest
 import numpy as np
+import sys
+import os
+
+# Add src to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+
 from model import Board, Piece, Move, is_legal, apply_move, generate_moves
 
 
