@@ -70,7 +70,7 @@ class Config:
     FILLED_CELL_COLOR_HSV_UPPER: Tuple[int, int, int] = (180, 255, 255)
     
     # Debug
-    DEBUG: bool = False
+    DEBUG: bool = True
     SAVE_DEBUG_FRAMES: bool = False
     
     # Heuristic Weights (Phase 3 improvements)

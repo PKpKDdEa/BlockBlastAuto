@@ -21,15 +21,24 @@ def find_window_handle(window_title: str) -> Optional[int]:
     Returns:
         Window handle (hwnd) or None if not found
     """
+    windows = []
+    visible_titles = []
+    
     def callback(hwnd, windows):
         if win32gui.IsWindowVisible(hwnd):
             title = win32gui.GetWindowText(hwnd)
+            if title:
+                visible_titles.append(title)
             if window_title.lower() in title.lower():
                 windows.append(hwnd)
         return True
     
-    windows = []
     win32gui.EnumWindows(callback, windows)
+    
+    if not windows and config.DEBUG:
+        print(f"Window '{window_title}' not found. Visible windows:")
+        for t in visible_titles[:10]: # Top 10
+            print(f"  - {t}")
     
     if windows:
         return windows[0]

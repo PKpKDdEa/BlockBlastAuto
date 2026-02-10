@@ -67,7 +67,8 @@ def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0) -
     Find the best sequence of moves for all available pieces using depth-first search.
     """
     if not pieces:
-        return evaluate_board(board), []
+        # Heuristic score for final state plus actual game score earned
+        return board.total_score + evaluate_board(board), []
     
     best_score = float('-inf')
     best_seq = None
@@ -76,23 +77,18 @@ def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0) -
     for i, piece in enumerate(pieces):
         remaining_pieces = pieces[:i] + pieces[i+1:]
         
-        # Generate all legal moves for this piece
-        moves = []
+        # Generate legal moves efficiently
         for r in range(board.rows):
             for c in range(board.cols):
                 if is_legal(board, piece, r, c):
-                    moves.append(Move(piece_index=piece.id, row=r, col=c))
-        
-        # Optimization: Sort moves by immediate score gain to prune or prioritize
-        for move in moves:
-            new_board, _, _ = apply_move(board, piece, move.row, move.col)
-            
-            # Recursive call for remaining pieces
-            score, seq = find_sequence_best_move(new_board, remaining_pieces, depth + 1)
-            
-            if score > best_score:
-                best_score = score
-                best_seq = [move] + (seq if seq else [])
+                    new_board, _, _ = apply_move(board, piece, r, c)
+                    
+                    # Recursive call for remaining pieces
+                    score, seq = find_sequence_best_move(new_board, remaining_pieces, depth + 1)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_seq = [Move(piece_index=piece.id, row=r, col=c)] + (seq if seq else [])
     
     return best_score, best_seq
 
