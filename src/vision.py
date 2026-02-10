@@ -190,6 +190,43 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     cols = max(1, min(5, cols))
     rows = max(1, min(5, rows))
     
+    # Now sample a grid WITHIN the bounding box (bx, by, bw, bh)
+    grid = np.zeros((rows, cols), dtype=np.uint8)
+    
+    sub_w = bw / float(cols)
+    sub_h = bh / float(rows)
+    
+    for r in range(rows):
+        for c in range(cols):
+            # Calculate sub-cell boundaries relative to piece_region
+            y1 = by + int(r * sub_h)
+            y2 = by + int((r + 1) * sub_h)
+            x1 = bx + int(c * sub_w)
+            x2 = bx + int((c + 1) * sub_w)
+            
+            # Sample center patch of this sub-cell
+            margin_h = max(1, int((y2 - y1) * 0.2))
+            margin_w = max(1, int((x2 - x1) * 0.2))
+            
+            # Use the same two-stage logic to decide if individual cell is filled
+            hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+            if hsv_patch.size > 0:
+                avg_h = np.mean(hsv_patch[:, :, 0])
+                avg_s = np.mean(hsv_patch[:, :, 1])
+                avg_v = np.mean(hsv_patch[:, :, 2])
+                
+                is_filled = False
+                if avg_s > 180 and avg_v > 150: # Absolute vibrancy pass (Stage 1)
+                    is_filled = True
+                elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
+                     (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
+                    is_filled = True
+                
+                if is_filled:
+                    grid[r, c] = 1
+                elif config.DEBUG:
+                    print(f"    Block at ({r},{c}) failed: Hue={avg_h:.0f}, Sat={avg_s:.1f}, Val={avg_v:.1f}")
+
     # Create a standardized 5x5 grid and center the detected piece within it
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
