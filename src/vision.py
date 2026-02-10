@@ -283,9 +283,45 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                 y = y1 + row * config.CELL_HEIGHT + config.CELL_HEIGHT // 2
                 cv2.circle(vis, (x, y), 5, (0, 0, 255), -1)
     
-    # Draw piece slots
+    # Draw piece slots and their internal 5x5 sampling grids
     for slot in config.PIECE_SLOTS:
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 2)
+        
+        # Draw 5x5 sampling grid inside the slot
+        cell_w = slot.width / 5.0
+        cell_h = slot.height / 5.0
+        for r in range(6):
+            y = int(slot.y + r * cell_h)
+            cv2.line(vis, (slot.x, y), (slot.x + slot.width, y), (100, 100, 100), 1)
+        for c in range(6):
+            x = int(slot.x + c * cell_w)
+            cv2.line(vis, (x, slot.y), (x, slot.y + slot.height), (100, 100, 100), 1)
+            
+    # Mark detected piece cells in the visualization
+    # We re-run a simplified version of the logic to draw dots in the vision window
+    for slot_idx, slot in enumerate(config.PIECE_SLOTS):
+        piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
+        if piece_region.size == 0: continue
+        hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
+        cell_w = slot.width / 5.0
+        cell_h = slot.height / 5.0
+        for r in range(5):
+            for c in range(5):
+                y1, y2 = int(r * cell_h), int((r + 1) * cell_h)
+                x1, x2 = int(c * cell_w), int((c + 1) * cell_w)
+                margin_h, margin_w = int((y2 - y1) * 0.25), int((x2 - x1) * 0.25)
+                patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
+                if patch.size > 0:
+                    avg_sat = np.mean(patch[:, :, 1])
+                    avg_val = np.mean(patch[:, :, 2])
+                    if avg_sat > config.VISION_SAT_THRESHOLD and avg_val > config.VISION_VAL_THRESHOLD:
+                        # Draw a small red indicator for detected cell
+                        cx = int(slot.x + c * cell_w + cell_w // 2)
+                        cy = int(slot.y + r * cell_h + cell_h // 2)
+                        cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
+                        # Highlight the sampling area
+                        cv2.rectangle(vis, (slot.x + x1 + margin_w, slot.y + y1 + margin_h), 
+                                      (slot.x + x2 - margin_w, slot.y + y2 - margin_h), (0, 255, 0), 1)
     
     return vis
 
