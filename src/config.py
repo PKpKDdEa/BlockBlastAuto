@@ -43,18 +43,21 @@ class Config:
     def CELL_HEIGHT(self) -> int:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) // self.GRID_ROWS
     
-    # Piece slots (3 pieces at bottom, to be calibrated)
-    # Each slot is (x, y, width, height)
-    PIECE_SLOTS: List[GameRegion] = None
+    # Tray configuration (Sampling pieces at bottom)
+    TRAY_CELL_SIZE: Tuple[int, int] = (45, 45)  # Calibrated size of a single block in the tray
+    TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     
     def __post_init__(self):
+        if self.TRAY_SLOT_CENTERS is None:
+            # Default centers for 1080x1920
+            self.TRAY_SLOT_CENTERS = [(130, 950), (310, 950), (492, 950)]
+            
         if self.PIECE_SLOTS is None:
             # Calibrated piece slots (Widened to 250px to avoid clipping)
-            self.PIECE_SLOTS = [
-                GameRegion(x=5, y=840, width=250, height=220),
-                GameRegion(x=185, y=840, width=250, height=220),
-                GameRegion(x=367, y=840, width=250, height=220),
-            ]
+            self.PIECE_SLOTS = []
+            for (cx, cy) in self.TRAY_SLOT_CENTERS:
+                w, h = int(self.TRAY_CELL_SIZE[0] * 5.5), int(self.TRAY_CELL_SIZE[1] * 5.5)
+                self.PIECE_SLOTS.append(GameRegion(x=cx - w//2, y=cy - h//2, width=w, height=h))
     
     # Mouse control
     MOUSE_DRAG_DURATION_MS: int = 300  # Duration of drag in milliseconds

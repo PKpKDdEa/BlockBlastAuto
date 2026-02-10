@@ -264,6 +264,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
+    Samples at fixed calibrated offsets from the center of the region.
     """
     if piece_region.size == 0:
         return None
@@ -273,58 +274,28 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     
     # Use unified mask logic
     mask = get_piece_vibrancy_mask(hsv)
+    sh, sw = piece_region.shape[:2]
+    cx, cy = sw // 2, sh // 2
+    cw, ch = config.TRAY_CELL_SIZE
     
-    # Find bounding box of the piece (all significant contours combined)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-        
-    piece_points = []
-    for cnt in contours:
-        if cv2.contourArea(cnt) > 40:
-            piece_points.append(cnt)
-            
-    if not piece_points:
-        return None
-        
-    all_points = np.concatenate(piece_points)
-    bx, by, bw, bh = cv2.boundingRect(all_points)
-    
-    # Infer grid dimensions
-    unit_size = 40.0 # Standard block size in tray
-    cols = max(1, min(5, int(round(bw / unit_size))))
-    rows = max(1, min(5, int(round(bh / unit_size))))
-    
-    # Now sample a grid WITHIN the bounding box (bx, by, bw, bh)
-    grid = np.zeros((rows, cols), dtype=np.uint8)
-    sub_w, sub_h = bw / float(cols), bh / float(rows)
-    
-    for r in range(rows):
-        for c in range(cols):
-            y1, y2 = by + int(r * sub_h), by + int((r + 1) * sub_h)
-            x1, x2 = bx + int(c * sub_w), bx + int((c + 1) * sub_w)
-            
-            margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
-            hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-            
-            if hsv_patch.size > 0:
-                avg_h, avg_s, avg_v = np.mean(hsv_patch[:, :, 0]), np.mean(hsv_patch[:, :, 1]), np.mean(hsv_patch[:, :, 2])
-                
-                is_filled = False
-                if avg_s > 180 and avg_v > 80: # Absolute vibrancy pass (Stage 1)
-                    is_filled = True
-                elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
-                     (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
-                    is_filled = True
-                
-                if is_filled:
-                    grid[r, c] = 1
-
-    # Create a standardized 5x5 grid and center the detected piece within it
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
-    start_row, start_col = (5 - rows) // 2, (5 - cols) // 2
-    grid_5x5[start_row : start_row + rows, start_col : start_col + cols] = grid
     
+    for r in range(5):
+        for c in range(5):
+            # Sample at (r-2, c-2) relative to center
+            px = int(cx + (c - 2) * cw)
+            py = int(cy + (r - 2) * ch)
+            
+            # Bound check
+            if 0 <= px < sw and 0 <= py < sh:
+                # Sample a small patch for robustness
+                margin = 2
+                patch = mask[max(0, py-margin):min(sh, py+margin+1), 
+                             max(0, px-margin):min(sw, px+margin+1)]
+                
+                if patch.size > 0 and np.mean(patch) > 100:
+                    grid_5x5[r, c] = 1
+                    
     return grid_5x5
 
 
@@ -439,72 +410,32 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
-        
-        # Use unified mask
         mask = get_piece_vibrancy_mask(hsv)
         
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours: continue
+        sh, sw = slot.height, slot.width
+        cx_rel, cy_rel = sw // 2, sh // 2
+        cw, ch = config.TRAY_CELL_SIZE
         
-        piece_points = []
-        for cnt in contours:
-            if cv2.contourArea(cnt) > 40:
-                piece_points.append(cnt)
-        
-        if not piece_points: continue
-        
-        all_points = np.concatenate(piece_points)
-        bx, by, bw, bh = cv2.boundingRect(all_points)
-        
-        # Infer dimensions for visualization (same as detection logic)
-        unit_size = slot.width / 5.0
-        cols = max(1, min(5, int(round(bw / unit_size))))
-        rows = max(1, min(5, int(round(bh / unit_size))))
-        
-        # Sub-cell dimensions
-        # Sub-cell dimensions
-        sub_w = bw / float(cols)
-        sub_h = bh / float(rows)
-        
-        # Center the 5x5 grid on the piece BBox
-        start_row = (5 - rows) // 2
-        start_col = (5 - cols) // 2
-        
-        # 1. Draw Standardized 5x5 Background Grid
-        grid_x0 = int(slot.x + bx - start_col * sub_w)
-        grid_y0 = int(slot.y + by - start_row * sub_h)
-        for r in range(6):
-            py = int(grid_y0 + r * sub_h)
-            cv2.line(vis, (grid_x0, py), (int(grid_x0 + 5 * sub_w), py), (70, 70, 70), 1)
-        for c in range(6):
-            px = int(grid_x0 + c * sub_w)
-            cv2.line(vis, (px, grid_y0), (px, int(grid_y0 + 5 * sub_h)), (70, 70, 70), 1)
-            
-        # 2. Highlight Detected Cells
-        for r in range(rows):
-            for c in range(cols):
-                y1, y2 = by + int(r * sub_h), by + int((r + 1) * sub_h)
-                x1, x2 = bx + int(c * sub_w), bx + int((c + 1) * sub_w)
-                margin_h, margin_w = max(1, int((y2 - y1) * 0.2)), max(1, int((x2 - x1) * 0.2))
+        # Draw the 5x5 fixed sampling grid for verification
+        for r in range(5):
+            for c in range(5):
+                px = slot.x + cx_rel + (c - 2) * cw
+                py = slot.y + cy_rel + (r - 2) * ch
                 
-                hsv_patch = hsv[y1+margin_h:y2-margin_h, x1+margin_w:x2-margin_w]
-                if hsv_patch.size > 0:
-                    avg_h, avg_s, avg_v = np.mean(hsv_patch[:, :, 0]), np.mean(hsv_patch[:, :, 1]), np.mean(hsv_patch[:, :, 2])
-                    
-                    is_filled = False
-                    if avg_s > 150 and avg_v > 80:
-                        is_filled = True
-                    elif (avg_h < config.VISION_EXCLUDE_HUE_MIN or avg_h > config.VISION_EXCLUDE_HUE_MAX) and \
-                         (avg_s > config.VISION_SAT_THRESHOLD and avg_v > config.VISION_VAL_THRESHOLD):
-                        is_filled = True
-                        
-                    if is_filled:
-                        # Draw detection markers perfectly center-aligned
-                        cx, cy = int(slot.x + x1 + sub_w / 2), int(slot.y + y1 + sub_h / 2)
-                        cv2.circle(vis, (cx, cy), 3, (0, 0, 255), -1)
-                        # Highlighting Box (Green)
-                        cv2.rectangle(vis, (int(slot.x + x1 + margin_w), int(slot.y + y1 + margin_h)), 
-                                      (int(slot.x + x2 - margin_w), int(slot.y + y2 - margin_h)), (0, 255, 0), 1)
+                # Highlight the calculated center of this cell
+                cv2.circle(vis, (px, py), 2, (70, 70, 70), -1)
+                
+                # Draw sampling boxes (visual indicator of where we "look")
+                box_w, box_h = max(2, cw // 4), max(2, ch // 4)
+                cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (100, 100, 100), 1)
+                
+                # Check if this cell is filled in the detect grid
+                # (Re-run raw detection for this specific cell for visual sync)
+                patch = mask[max(0, cy_rel + (r-2)*ch - 2):min(sh, cy_rel + (r-2)*ch + 3), 
+                             max(0, cx_rel + (c-2)*cw - 2):min(sw, cx_rel + (c-2)*cw + 3)]
+                if patch.size > 0 and np.mean(patch) > 100:
+                    cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (0, 255, 0), 1)
+                    cv2.circle(vis, (px, py), 3, (0, 0, 255), -1)
 
     return vis
 

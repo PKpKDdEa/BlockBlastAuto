@@ -25,6 +25,8 @@ class CalibrationTool:
             "Click on center of FIRST piece slot (left)",
             "Click on center of SECOND piece slot (middle)",
             "Click on center of THIRD piece slot (right)",
+            "Click on TOP-LEFT corner of a SINGLE BLOCK in the tray",
+            "Click on BOTTOM-RIGHT corner of that SAME BLOCK",
         ]
     
     def mouse_callback(self, event, x, y, flags, param):
@@ -100,6 +102,11 @@ class CalibrationTool:
         grid_tl = self.points[0]
         grid_br = self.points[1]
         piece_slots = self.points[2:5]
+        block_tl = self.points[5]
+        block_br = self.points[6]
+        
+        tray_cell_w = abs(block_br[0] - block_tl[0])
+        tray_cell_h = abs(block_br[1] - block_tl[1])
         
         print("\n" + "=" * 60)
         print("Calibration Complete!")
@@ -110,15 +117,20 @@ class CalibrationTool:
         print("-" * 60)
         print(f"GRID_TOP_LEFT = {grid_tl}")
         print(f"GRID_BOTTOM_RIGHT = {grid_br}")
+        print(f"TRAY_CELL_SIZE = ({tray_cell_w}, {tray_cell_h})")
         print()
         
-        # Calculate piece slot regions (estimate width/height)
-        slot_width = 200  # Default estimate
-        slot_height = 200
+        # Calculate piece slot regions (w/h for visualization, but centers for sampling)
+        slot_width = int(tray_cell_w * 5.5)  # Buffer for 5x5
+        slot_height = int(tray_cell_h * 5.5)
         
-        print("PIECE_SLOTS = [")
+        print("TRAY_SLOT_CENTERS = [")
+        for x, y in piece_slots:
+            print(f"    ({x}, {y}),")
+        print("]")
+        
+        print("\nPIECE_SLOTS = [")
         for i, (x, y) in enumerate(piece_slots):
-            # Center point to top-left corner
             slot_x = x - slot_width // 2
             slot_y = y - slot_height // 2
             print(f"    GameRegion(x={slot_x}, y={slot_y}, width={slot_width}, height={slot_height}),")
@@ -131,6 +143,11 @@ class CalibrationTool:
         with open(config_path, 'w') as f:
             f.write(f"GRID_TOP_LEFT = {grid_tl}\n")
             f.write(f"GRID_BOTTOM_RIGHT = {grid_br}\n")
+            f.write(f"TRAY_CELL_SIZE = ({tray_cell_w}, {tray_cell_h})\n")
+            f.write("\nTRAY_SLOT_CENTERS = [\n")
+            for x, y in piece_slots:
+                f.write(f"    ({x}, {y}),\n")
+            f.write("]\n")
             f.write("\nPIECE_SLOTS = [\n")
             for i, (x, y) in enumerate(piece_slots):
                 slot_x = x - slot_width // 2
