@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
 
-@dataclass
+@dataclass(eq=False)
 class Piece:
     """Represents a game piece."""
     id: int
@@ -39,6 +39,18 @@ class Piece:
         width = int(max_c - min_c + 1)
         
         return cls(id=piece_id, cells=cells, width=width, height=height, raw_mask=raw_mask)
+    
+    def __eq__(self, other):
+        """Custom equality check to handle numpy arrays in raw_mask."""
+        if not isinstance(other, Piece):
+            return False
+        if self.id != other.id or self.width != other.width or self.height != other.height:
+            return False
+        if self.cells != other.cells:
+            return False
+        if self.raw_mask is not None and other.raw_mask is not None:
+            return np.array_equal(self.raw_mask, other.raw_mask)
+        return self.raw_mask is other.raw_mask
     
     @property
     def anchor_offset(self) -> Tuple[float, float]:

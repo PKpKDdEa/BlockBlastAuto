@@ -560,6 +560,10 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
                         cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (0, 100, 255), -1)
                     else:
                         cv2.rectangle(vis, (gx, gy), (gx+cell_size-2, gy+cell_size-2), (40, 40, 40), 1)
+        else:
+            # Explicitly label empty slots
+            cv2.putText(vis, "EMPTY / PLACED", (x_off, y_off + 220), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (100, 100, 100), 1)
                         
     return vis
 

@@ -77,9 +77,8 @@ def main():
             draw_pause_status(vis, state["paused"])
             cv2.imshow("Bot Vision", vis)
             
-            # Show Stable Piece Analysis (Update only on new pieces)
-            has_pieces = any(p is not None for p in pieces)
-            if has_pieces and (state["pieces_last_seen"] is None or pieces != state["pieces_last_seen"]):
+            # Show Stable Piece Analysis (Update only on turn change)
+            if state["pieces_last_seen"] is None or pieces != state["pieces_last_seen"]:
                 state["diag_frame"] = visualize_piece_analysis(frame, pieces)
                 state["pieces_last_seen"] = pieces
             
