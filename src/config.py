@@ -68,14 +68,14 @@ class Config:
     # The piece is held ABOVE the cursor.
     # User reports offset increases as the piece moves UP the screen.
     DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
-    DRAG_OFFSET_Y_TOP: int = 250     # Offset at the top of the board
+    DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
     
     # Vision Throttles
-    VISION_SAT_THRESHOLD: int = 140
-    VISION_VAL_THRESHOLD: int = 140
-    # Exclude Tray Blue (Hue 100-130)
-    VISION_EXCLUDE_HUE_MIN: int = 100
-    VISION_EXCLUDE_HUE_MAX: int = 135
+    VISION_SAT_THRESHOLD: int = 160
+    VISION_VAL_THRESHOLD: int = 170
+    # Exclude Tray Blue-Gray
+    VISION_EXCLUDE_HUE_MIN: int = 80
+    VISION_EXCLUDE_HUE_MAX: int = 145
     
     # Debug
     DEBUG: bool = True

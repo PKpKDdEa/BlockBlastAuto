@@ -108,7 +108,7 @@ def main():
                 cv2.imshow("Bot Vision", vis_drag)
                 cv2.waitKey(500) # Show target for 500ms
                 
-            drag_piece(move.piece_index, move.row, move.col)
+            drag_piece(piece, move.row, move.col)
             
             move_count += 1
             

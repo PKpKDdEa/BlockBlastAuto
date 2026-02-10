@@ -159,31 +159,39 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
         cv2.imwrite(f"debug/piece_region_{int(time.time()*1000)}.png", piece_region)
         cv2.imwrite(f"debug/mask_{int(time.time()*1000)}.png", mask)
     
-    # Morphological clean up
-    kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel) # Remove noise
+    # Morphological clean up - use larger kernel if needed
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel) # Remove substantial noise
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel) # Fill gaps
     
-    # Use contours to isolate the piece and ignore slot borders/noise
+    # Use contours to isolate the piece
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
         
-    # Find bounding box of the piece (all contours combined)
-    all_points = np.concatenate(contours)
-    x, y, w, h = cv2.boundingRect(all_points)
+    # Find largest contour to ignore small noise
+    largest_contour = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest_contour)
     
-    # Extra safety: crop must be at least a few pixels
-    if w < 5 or h < 5:
+    slot_w, slot_h = piece_region.shape[1], piece_region.shape[0]
+    slot_area = slot_w * slot_h
+    
+    # If detection fills too much of the slot (> 80%), it's probably the tray background
+    if area > slot_area * 0.8:
+        if config.DEBUG:
+            print(f"  Slot Region {piece_region.shape}: Area too large ({area:.0f}/{slot_area:.0f}), ignoring as background.")
+        return None
+        
+    x, y, w, h = cv2.boundingRect(largest_contour)
+    
+    # If piece is too small, ignore
+    if area < 50:
         return None
         
     mask_cropped = mask[y:y+h, x:x+w]
     
-    # Estimate grid dimensions based on pixel size relative to slot size
-    # In Block Blast, a 1-unit block is roughly 1/5 of the tray slot dimension.
-    slot_w = piece_region.shape[1]
+    # Inferred dimensions
     cell_size = slot_w / 5.0
-    
     cols = max(1, int(round(w / cell_size)))
     rows = max(1, int(round(h / cell_size)))
     
@@ -192,7 +200,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
     rows = min(5, rows)
     
     if config.DEBUG:
-        print(f"  Slot Region: {piece_region.shape}, Mask BBox: ({x},{y},{w},{h}), Inferred: {rows}x{cols}")
+        print(f"  Detected Piece: BBox({x},{y},{w},{h}), Area: {area:.0f}, Inferred: {rows}x{cols}")
     
     # Resize to the inferred grid dimensions
     mask_resized = cv2.resize(mask_cropped, (cols, rows), interpolation=cv2.INTER_NEAREST)

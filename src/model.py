@@ -34,6 +34,21 @@ class Piece:
         
         height, width = mask.shape
         return cls(id=piece_id, cells=cells, width=width, height=height)
+    
+    @property
+    def anchor_offset(self) -> Tuple[float, float]:
+        """
+        Return the offset from piece cell (0,0) to the visual center 
+        in grid units.
+        """
+        if not self.cells:
+            return 0.0, 0.0
+        
+        # Center of the bounding box
+        center_r = (self.height - 1) / 2.0
+        center_c = (self.width - 1) / 2.0
+        
+        return center_r, center_c
 
 
 @dataclass

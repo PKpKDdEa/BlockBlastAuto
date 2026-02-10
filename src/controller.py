@@ -80,36 +80,29 @@ def move_mouse_and_drag(start_xy: Tuple[int, int], end_xy: Tuple[int, int], dura
     time.sleep(0.1)
 
 
-def drag_piece(piece_index: int, target_row: int, target_col: int) -> None:
+def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     """
     Drag a piece from its slot to a target cell on the board.
-    
-    Args:
-        piece_index: Index of piece to drag (0-2)
-        target_row: Target row on board
-        target_col: Target column on board
     """
-    start_pos = piece_slot_center(piece_index)
-    end_pos = cell_center(target_row, target_col)
+    start_pos = piece_slot_center(piece.id)
+    top_left_cell_pos = cell_center(target_row, target_col)
     
     # Calculate scaling vertical offset
-    # offset increases as target_y moves UP (smaller Y)
-    y_top = config.GRID_TOP_LEFT[1]
-    y_bottom = config.GRID_BOTTOM_RIGHT[1]
+    y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
+    progress = max(0, min(1, (y_bottom - top_left_cell_pos[1]) / (y_bottom - y_top)))
+    current_offset_y = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
     
-    # Linear interpolation: T=1.0 at top, T=0.0 at bottom slot
-    # but let's just use the current Y relative to the grid
-    target_y = end_pos[1]
-    progress = (y_bottom - target_y) / (y_bottom - y_top)
-    progress = max(0, min(1, progress)) # Clamp 0-1
+    # Visual center offset in pixels
+    anchor_dr, anchor_dc = piece.anchor_offset
+    dest_x = top_left_cell_pos[0] + int(anchor_dc * config.CELL_WIDTH)
+    dest_y = top_left_cell_pos[1] + int(anchor_dr * config.CELL_HEIGHT) + current_offset_y
     
-    current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
-    
-    end_pos_offset = (end_pos[0], end_pos[1] + current_offset)
+    end_pos_offset = (dest_x, dest_y)
     
     if config.DEBUG:
-        print(f"Dragging piece {piece_index} from {start_pos} to {end_pos_offset}")
-        print(f"  Target: {end_pos}, Progress: {progress:.2f}, Offset: {current_offset}")
+        print(f"Dragging piece {piece.id} to board ({target_row}, {target_col})")
+        print(f"  Target Cell: {top_left_cell_pos}, Offset: {current_offset_y}, Anchor: {piece.anchor_offset}")
+        print(f"  Final Cursor Target: {end_pos_offset}")
     
     move_mouse_and_drag(start_pos, end_pos_offset)
 
