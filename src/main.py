@@ -158,9 +158,9 @@ def main():
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
                 click_xy = (end_xy[0], end_xy[1] + current_offset)
                 
-                vis_drag = visualize_drag(frame, move, start_xy, click_xy, end_xy)
+                vis_drag = visualize_drag(vis, move, start_xy, click_xy, end_xy)
                 cv2.imshow("Bot Vision", vis_drag)
-                cv2.waitKey(800) # Show target briefly
+                cv2.waitKey(1)
                 
             drag_piece(piece, move.row, move.col)
             
@@ -179,17 +179,15 @@ def main():
             
             if missed:
                 print(f"  [!!!] PLACEMENT FAILURE: Piece {move.piece_index} missed ({move.row}, {move.col})")
-                print(f"        Action: Adjust DRAG_OFFSET_Y values in config.py")
+                print(f"        Action: Adjust DRAG_OFFSET_Y values or Re-Calibrate Slots.")
             else:
                 print(f"  [OK] Piece {move.piece_index} placed successfully at ({move.row}, {move.col})")
                 
-                # Feedback Loop: Confirm this pattern is valid and learn it
-                from vision import template_manager
-                # We need the relative 5x5 which we used for detection. 
-                # Piece.from_mask already trimmed it, but let's re-save if we have the mask context.
-                # For now, let's look back at how we detected it.
-                if hasattr(piece, 'raw_mask') and piece.raw_mask is not None:
+                # Success-Based Learning (Phase 8)
+                if piece.is_new and piece.raw_mask is not None:
+                    from vision import template_manager
                     template_manager.learn_pattern(piece.raw_mask)
+                    print(f"  [LEARNING] Successfully verified and saved new pattern for piece {piece.id}")
             
             move_count += 1
             

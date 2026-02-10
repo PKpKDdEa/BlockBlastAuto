@@ -39,13 +39,13 @@ class TemplateManager:
             if config.DEBUG:
                 print(f"Error loading templates: {e}")
                 
-    def match_and_snap(self, grid: np.ndarray, threshold: float = 0.8) -> np.ndarray:
+    def match_and_snap(self, grid: np.ndarray, threshold: float = 0.8) -> Tuple[np.ndarray, float, str, Dict]:
         """
         Compare input grid against library and snap to the best match.
-        If no match is good enough, we check if it's a 'reasonable' new piece.
+        Returns (final_grid, score, name, match_info)
         """
         if len(self.templates) == 0:
-            return grid
+            return grid, 0.0, "unknown", {"is_new": True}
             
         best_match = None
         best_score = 0.0
@@ -54,7 +54,6 @@ class TemplateManager:
         for category, pieces in self.data.items():
             for name, grid_list in pieces.items():
                 template = np.array(grid_list, dtype=np.uint8)
-                # Jaccard Similarity: Intersection over Union
                 int_sum = np.logical_and(grid, template).sum()
                 uni_sum = np.logical_or(grid, template).sum()
                 
@@ -66,16 +65,23 @@ class TemplateManager:
                     best_match = template
                     best_name = f"{category}/{name}"
                 
+        # match_info for Success-Based Learning
+        match_info = {
+            "raw_grid": grid.tolist(),
+            "best_score": best_score,
+            "is_new": best_score < threshold and np.sum(grid) > 0
+        }
+
         # 1. High Confidence SNAPPING
         if best_match is not None and best_score >= threshold:
-            return best_match, best_score, best_name
+            return best_match, best_score, best_name, match_info
             
         # 2. NOISE FILTERING
         block_count = np.sum(grid)
         if best_score < 0.3 and block_count > 12:
-            return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise"
+            return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise", match_info
             
-        return grid, best_score, "new-pattern" if block_count > 0 else "empty"
+        return grid, best_score, "new-pattern" if block_count > 0 else "empty", match_info
         
     def learn_pattern(self, grid: np.ndarray):
         """Save a new verified pattern to the library."""
@@ -228,10 +234,10 @@ def read_pieces(frame: np.ndarray) -> List[Piece]:
     
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
-        mask = detect_piece_mask(piece_region)
+        mask, is_new = detect_piece_mask(piece_region)
         
         if mask is not None and np.sum(mask) > 0:
-            piece = Piece.from_mask(piece_id=slot_idx, mask=mask)
+            piece = Piece.from_mask(piece_id=slot_idx, mask=mask, is_new=is_new)
             pieces.append(piece)
             if config.DEBUG:
                 print(f"Piece {slot_idx} detected: {piece.width}x{piece.height}")
@@ -241,24 +247,33 @@ def read_pieces(frame: np.ndarray) -> List[Piece]:
     return pieces
 
 
-def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
+def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], bool]:
     """
-    Detect the piece shape by finding its bounding box and sampling a relative grid.
-    This handles cases where the game auto-centers pieces in the tray.
+    Detect the piece shape and identify if it is a new pattern.
+    Returns (final_grid, is_new)
     """
     grid_5x5 = get_piece_grid(piece_region)
     if grid_5x5 is None:
-        return None
+        return None, False
         
     # SNAPPING: Use template manager to clean up the detection
-    final_grid, score, name = template_manager.match_and_snap(grid_5x5)
+    final_grid, score, name, match_info = template_manager.match_and_snap(grid_5x5)
     
     if config.DEBUG and np.sum(final_grid) > 0:
         print(f"  Grid Detected (Match: {name}@{score:.2f})")
         for row in final_grid:
             print("  " + "".join(["#" if x else "." for x in row]))
             
-    return final_grid
+    return final_grid, match_info.get("is_new", False)
+            
+def find_piece_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
+    """Calculates the visual center of mass for a piece mask."""
+    M = cv2.moments(mask)
+    if M["m00"] > 100: # Minimum area threshold
+        cx = int(M["m10"] / M["m00"])
+        cy = int(M["m01"] / M["m00"])
+        return cx, cy
+    return None
 
 
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
@@ -275,7 +290,14 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Use unified mask logic
     mask = get_piece_vibrancy_mask(hsv)
     sh, sw = piece_region.shape[:2]
-    cx, cy = sw // 2, sh // 2
+    
+    # CENTROID DETECTION (Auto-centering)
+    centroid = find_piece_centroid(mask)
+    if centroid:
+        cx, cy = centroid
+    else:
+        cx, cy = sw // 2, sh // 2
+        
     cw, ch = config.TRAY_CELL_SIZE
     
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
@@ -434,6 +456,12 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                 # Highlight the calculated center of this cell
                 cv2.circle(vis, (px, py), 2, (70, 70, 70), -1)
                 
+                # Draw the centroid as a blue dot for feedback
+                centroid = find_piece_centroid(mask)
+                if centroid:
+                    vcx, vcy = int(slot.x + centroid[0]), int(slot.y + centroid[1])
+                    cv2.circle(vis, (vcx, vcy), 4, (255, 100, 0), -1)
+
                 # Draw sampling boxes (visual indicator of where we "look")
                 box_w, box_h = max(2, cw // 4), max(2, ch // 4)
                 cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (100, 100, 100), 1)
@@ -478,7 +506,7 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
         # Get identification details
         grid_5x5 = get_piece_grid(piece_region)
         if grid_5x5 is not None:
-            final_grid, score, name = template_manager.match_and_snap(grid_5x5)
+            final_grid, score, name, match_info = template_manager.match_and_snap(grid_5x5)
             
             # Label
             label = f"{name}"

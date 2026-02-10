@@ -15,9 +15,10 @@ class Piece:
     width: int
     height: int
     raw_mask: Optional[np.ndarray] = None # Original 5x5 detection for learning
+    is_new: bool = False # Whether this piece is a new unidentified pattern
     
     @classmethod
-    def from_mask(cls, piece_id: int, mask: np.ndarray) -> 'Piece':
+    def from_mask(cls, piece_id: int, mask: np.ndarray, is_new: bool = False) -> 'Piece':
         """
         Create piece from binary mask. Automatically trims empty space
         to keep piece offsets relative to its own top-left.
@@ -38,7 +39,7 @@ class Piece:
         height = int(max_r - min_r + 1)
         width = int(max_c - min_c + 1)
         
-        return cls(id=piece_id, cells=cells, width=width, height=height, raw_mask=raw_mask)
+        return cls(id=piece_id, cells=cells, width=width, height=height, raw_mask=raw_mask, is_new=is_new)
     
     def __eq__(self, other):
         """Custom equality check to handle numpy arrays in raw_mask."""
