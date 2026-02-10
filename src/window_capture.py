@@ -89,7 +89,7 @@ def capture_region(region: GameRegion) -> np.ndarray:
         img = np.array(screenshot)
         
         # Convert BGRA to BGR (remove alpha channel)
-        img_bgr = img[:, :, :3]
+        img_bgr = img[:, :, :3].copy()
         
         return img_bgr
 

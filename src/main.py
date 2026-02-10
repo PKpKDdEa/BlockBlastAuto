@@ -5,6 +5,7 @@ import time
 import cv2
 from window_capture import WindowCapture
 from vision import read_board, read_pieces, visualize_detection
+from model import Board
 from solver import best_move
 from controller import drag_piece
 from config import config
