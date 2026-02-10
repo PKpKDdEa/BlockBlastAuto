@@ -196,5 +196,27 @@
             "WEIGHT_NEAR_COMPLETE": 2.81300828951395,
             "WEIGHT_STREAK_BONUS": 19.909633754733427
         }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.877892609048864,
+            "WEIGHT_HOLES_PENALTY": -15.854333750921029,
+            "WEIGHT_BUMPINESS": -0.5407746849232401,
+            "WEIGHT_NEAR_COMPLETE": 3.1206035318220495,
+            "WEIGHT_STREAK_BONUS": 21.50945529447178
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 2.0040812202639677,
+            "WEIGHT_HOLES_PENALTY": -13.640264556143391,
+            "WEIGHT_BUMPINESS": -0.47020049109215944,
+            "WEIGHT_NEAR_COMPLETE": 3.1931395741873114,
+            "WEIGHT_STREAK_BONUS": 18.112857273473566
+        }
     }
 ]

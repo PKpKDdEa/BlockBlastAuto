@@ -153,10 +153,13 @@ def detect_piece_mask(piece_region: np.ndarray) -> Optional[np.ndarray]:
             avg_sat = np.mean(patch[:, :, 1])
             avg_val = np.mean(patch[:, :, 2])
             
-            # Use thresholds from config but slightly more lenient for pieces
-            if avg_sat > 100 and avg_val > 100:
+            # Use thresholds from config
+            if avg_sat > config.VISION_SAT_THRESHOLD and avg_val > config.VISION_VAL_THRESHOLD:
                 grid[r, c] = 1
                 found_any = True
+            elif config.DEBUG and r == 2 and c == 2:
+                # Log one cell to help user tune thresholds if it still fails
+                print(f"    Slot {r},{c} Sample: Sat={avg_sat:.1f}, Val={avg_val:.1f} (Target: >{config.VISION_SAT_THRESHOLD}, >{config.VISION_VAL_THRESHOLD})")
                 
     if not found_any:
         return None
