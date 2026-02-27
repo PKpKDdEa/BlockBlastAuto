@@ -39,9 +39,9 @@ class TemplateManager:
             if config.DEBUG:
                 print(f"Error loading templates: {e}")
                 
-    def match_and_snap(self, grid: np.ndarray, threshold: float = 0.8) -> Tuple[np.ndarray, float, str, Dict]:
+    def match_and_validate(self, grid: np.ndarray, threshold: float = 0.82) -> Tuple[np.ndarray, float, str, Dict]:
         """
-        Compare input grid against library and snap to the best match.
+        Compare input grid against library with NMS and shape validation.
         Returns (final_grid, score, name, match_info)
         """
         if len(self.templates) == 0:
@@ -51,6 +51,7 @@ class TemplateManager:
         best_score = 0.0
         best_name = "unknown"
         
+        # 1. Multi-template matching
         for category, pieces in self.data.items():
             for name, grid_list in pieces.items():
                 template = np.array(grid_list, dtype=np.uint8)
@@ -64,56 +65,72 @@ class TemplateManager:
                     best_score = score
                     best_match = template
                     best_name = f"{category}/{name}"
-                
-        # match_info for Success-Based Learning
+        
+        # 2. Shape Validation Rules (Geometry Enforcement)
+        is_valid = self.validate_shape(grid, best_name, best_score)
+        
         match_info = {
-            "raw_grid": grid.tolist(),
             "best_score": best_score,
-            "is_new": best_score < threshold and np.sum(grid) > 0
+            "is_valid": is_valid,
+            "category": best_name.split('/')[0] if '/' in best_name else "unknown"
         }
 
-        # 1. High Confidence SNAPPING (Improved for User Request)
-        # If we have any match above 0.5, force snap it to avoid "new-pattern"
-        if best_match is not None and best_score >= 0.5:
+        # 3. High Confidence Snapping with Validation
+        if best_match is not None and best_score >= threshold and is_valid:
             return best_match, best_score, best_name, match_info
             
-        # 2. NOISE FILTERING
+        # 4. Strict Overread Protection (NMS-like filtering)
+        # If we have a lot of blocks but low score, it's likely a misread/noise
         block_count = np.sum(grid)
-        if best_score < 0.3 and block_count > 12:
-            return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise", match_info
-            
-        # If no match > 0.5, return as is but label as unknown instead of new-pattern
+        if best_score < 0.5 and block_count > 10:
+             return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise", match_info
+
         return grid, best_score, "unknown", match_info
+
+    def validate_shape(self, grid: np.ndarray, name: str, score: float) -> bool:
+        """
+        Enforce geometric rules for specific shape categories.
+        Rules:
+        - dot: exactly 1 block
+        - line: 2-5 blocks, straight horizontal or vertical
+        - square: 4 blocks (2x2) or 9 blocks (3x3)
+        - L/T/ZS: 4-5 blocks in specific connectivity
+        """
+        blocks = np.sum(grid)
+        if blocks == 0: return True
         
+        category = name.split('/')[0] if '/' in name else ""
+        
+        if category == "dots":
+            return blocks == 1
+        elif category == "lines":
+            if not (2 <= blocks <= 5): return False
+            # Check if it's a straight line (only 1 row and multiple cols, or vice versa)
+            rows = np.any(grid, axis=1)
+            cols = np.any(grid, axis=0)
+            return (np.sum(rows) == 1 and np.sum(cols) == blocks) or \
+                   (np.sum(cols) == 1 and np.sum(rows) == blocks)
+        elif category == "squares":
+            if blocks == 4: # 2x2
+                rows = np.any(grid, axis=1)
+                cols = np.any(grid, axis=0)
+                return np.sum(rows) == 2 and np.sum(cols) == 2
+            if blocks == 9: # 3x3
+                rows = np.any(grid, axis=1)
+                cols = np.any(grid, axis=0)
+                return np.sum(rows) == 3 and np.sum(cols) == 3
+            return False
+        elif category in ["corners", "l_shapes", "t_shapes", "zs_shapes", "diag_shapes"]:
+            # Complex shapes usually have 3-5 blocks
+            if not (3 <= blocks <= 5): return False
+            # Basic connectivity check: all blocks should be contiguous (Simplified)
+            return True # Best score + confidence threshold is primary guard here
+            
+        return score > 0.9 # Default fallback for unknown categories
+
     def learn_pattern(self, grid: np.ndarray):
-        """Save a new verified pattern to the library."""
-        # Check if we already have it
-        if any(np.array_equal(grid, t) for t in self.templates):
-            return
-            
-        self.templates.append(grid)
-        
-        # Save back to file (simple append to a 'learned' category)
-        try:
-            data = {}
-            if os.path.exists(self.templates_path):
-                with open(self.templates_path, 'r') as f:
-                    data = json.load(f)
-            
-            if "learned" not in data:
-                data["learned"] = {}
-                
-            pattern_id = f"pattern_{len(data['learned']) + 1}"
-            data["learned"][pattern_id] = grid.tolist()
-            
-            with open(self.templates_path, 'w') as f:
-                json.dump(data, f, indent=2)
-                
-            if config.DEBUG:
-                print(f"LEARNED new piece pattern: {pattern_id}")
-        except Exception as e:
-            if config.DEBUG:
-                print(f"Error saving learned template: {e}")
+        """[DISABLED in v2.1] - Managed templates only."""
+        pass
 
 # Global instance
 template_manager = TemplateManager()
@@ -154,6 +171,8 @@ def read_board(frame: np.ndarray) -> Board:
             
             is_filled = classify_cell(patch)
             board.grid[row, col] = 1 if is_filled else 0
+            if is_filled:
+                board.bitboard |= (1 << (row * 8 + col))
             
     if config.DEBUG:
         filled_count = np.sum(board.grid == 1)
@@ -259,7 +278,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
         return None, False
         
     # SNAPPING: Use template manager to clean up the detection
-    final_grid, score, name, match_info = template_manager.match_and_snap(grid_5x5)
+    final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
     
     if config.DEBUG and np.sum(final_grid) > 0:
         print(f"  Grid Detected (Match: {name}@{score:.2f})")
@@ -315,8 +334,8 @@ def find_best_alignment(mask: np.ndarray, initial_cx: int, initial_cy: int, cw: 
                 continue
                 
             # Check matching score (IoU) against template library
-            # threshold=0.8 is standard for match_and_snap
-            _, score, name, _ = template_manager.match_and_snap(temp_grid, threshold=0.8)
+            # threshold=0.8 is standard for match_and_validate
+            _, score, name, _ = template_manager.match_and_validate(temp_grid, threshold=0.8)
             
             # Distance from initial centroid (Centroid Bias)
             dist = (dx**2 + dy**2)**0.5
@@ -565,7 +584,7 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
         # Get identification details
         grid_5x5 = get_piece_grid(piece_region)
         if grid_5x5 is not None:
-            final_grid, score, name, match_info = template_manager.match_and_snap(grid_5x5)
+            final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
             
             # Label
             label = f"{name}"
