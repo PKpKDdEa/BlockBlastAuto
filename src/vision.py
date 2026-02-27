@@ -193,7 +193,7 @@ def read_board(frame: np.ndarray) -> Board:
 def classify_cell(patch: np.ndarray) -> bool:
     """
     Classifies a board cell as filled or empty.
-    v2.7: Uses unified vibrancy mask to exclude saturated blue backgrounds.
+    v3.1: Uses unified vibrancy mask + Brightness Guard.
     """
     if patch.size == 0:
         return False
@@ -201,35 +201,41 @@ def classify_cell(patch: np.ndarray) -> bool:
     hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
     mask = get_piece_vibrancy_mask(hsv)
     
+    # v3.1 Brightness Guard: Empty cells are dark (dimmed)
+    # Average Value must be > 80 to be a bright block
+    val_channel = hsv[:, :, 2]
+    if np.mean(val_channel) < 80:
+        return False
+        
     # If more than 30% of the patch is vibrant color, consider it filled
-    return np.mean(mask) > 80
+    return np.mean(mask) > 100 # v3.1: Slightly higher threshold
 
 
 def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     """
     Unified vibrancy-aware mask for pieces. 
-    v3.0: Surgical blue exclusion and dark blue recovery.
+    v3.1: Broadened blue exclusion to fully reject background.
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # v3.0: Lowered saturation to 100 to catch dark blue pieces
-    lower_vibrant = np.array([0, 100, 40])
+    # v3.1: Restoration to 140 to ignore dimmed board
+    lower_vibrant = np.array([0, 140, 60])
     upper_vibrant = np.array([180, 255, 255])
     mask_high_sat = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
     # Stage 2: Color Selective (Green, Red, Yellow, Purple)
-    lower_r1 = np.array([0, 80, 40])
+    lower_r1 = np.array([0, 100, 60])
     upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
     
-    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, 80, 40])
+    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, 100, 60])
     upper_r2 = np.array([180, 255, 255])
     
     mask_r1 = cv2.inRange(hsv_img, lower_r1, upper_r1)
     mask_r2 = cv2.inRange(hsv_img, lower_r2, upper_r2)
     
-    # Stage 3: SURGICAL BLUE EXCLUSION (Only for low-saturation background)
-    # v3.0: Target exactly the MuMu slot background [115-135] with low-ish sat
+    # Stage 3: BROAD BLUE EXCLUSION (Specifically targets the Tray Background)
+    # v3.1: Broadened to 190 Saturation to ensure background is rejected
     lower_bg_blue = np.array([config.VISION_EXCLUDE_HUE_MIN, 0, 0])
-    upper_bg_blue = np.array([config.VISION_EXCLUDE_HUE_MAX, 130, 255])
+    upper_bg_blue = np.array([config.VISION_EXCLUDE_HUE_MAX, 190, 255])
     mask_bg_blue = cv2.inRange(hsv_img, lower_bg_blue, upper_bg_blue)
     
     # Combined Logic: (High Saturation OR Selective Color) AND (NOT Background Blue)
@@ -316,12 +322,14 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if not candidates:
         return None
         
-    # Closest to center is our piece
     best_cnt_data = min(candidates, key=lambda x: x[1])
     main_cnt = best_cnt_data[4]
     
-    # 2. INFER GRID DIMENSIONS FROM BOUNDING BOX
+    # v3.1: Noise Filter - If contour is essentially the whole slot, it's noise
     bx, by, bw, bh = cv2.boundingRect(main_cnt)
+    if bw > sw * 0.9 and bh > sh * 0.9:
+        if config.DEBUG: print("  [v3.1] Rejected: Contour too large (background bleed)")
+        return None
     
     # v3.0: Snap to nearest 42px cell count
     cols = int(round(bw / 42.0))
