@@ -76,8 +76,10 @@ class TemplateManager:
         }
 
         # 3. High Confidence Snapping with Validation
-        if best_match is not None and best_score >= threshold and is_valid:
-            return best_match, best_score, best_name, match_info
+        # v2.2: Aggressive Snapping. If score is extremely high (>0.85), trust the match even if validation is iffy.
+        if best_match is not None:
+            if (best_score >= threshold and is_valid) or (best_score >= 0.85):
+                return best_match, best_score, best_name, match_info
             
         # 4. Strict Overread Protection (NMS-like filtering)
         # If we have a lot of blocks but low score, it's likely a misread/noise
@@ -90,11 +92,10 @@ class TemplateManager:
     def validate_shape(self, grid: np.ndarray, name: str, score: float) -> bool:
         """
         Enforce geometric rules for specific shape categories.
-        Rules:
+        Rules (loosened in v2.2):
         - dot: exactly 1 block
-        - line: 2-5 blocks, straight horizontal or vertical
-        - square: 4 blocks (2x2) or 9 blocks (3x3)
-        - L/T/ZS: 4-5 blocks in specific connectivity
+        - line: 2-5 blocks (+/- 1 noise tolerance)
+        - square: 4 blocks (2x2) or 9 blocks (3x3) (+/- 1 noise tolerance)
         """
         blocks = np.sum(grid)
         if blocks == 0: return True
@@ -104,29 +105,24 @@ class TemplateManager:
         if category == "dots":
             return blocks == 1
         elif category == "lines":
-            if not (2 <= blocks <= 5): return False
-            # Check if it's a straight line (only 1 row and multiple cols, or vice versa)
+            # Allow +/- 1 block variance for noisy detections
+            if not (1 <= blocks <= 6): return False
             rows = np.any(grid, axis=1)
             cols = np.any(grid, axis=0)
-            return (np.sum(rows) == 1 and np.sum(cols) == blocks) or \
-                   (np.sum(cols) == 1 and np.sum(rows) == blocks)
+            # Must be primarily elongated
+            return np.sum(rows) == 1 or np.sum(cols) == 1
         elif category == "squares":
-            if blocks == 4: # 2x2
-                rows = np.any(grid, axis=1)
-                cols = np.any(grid, axis=0)
-                return np.sum(rows) == 2 and np.sum(cols) == 2
-            if blocks == 9: # 3x3
-                rows = np.any(grid, axis=1)
-                cols = np.any(grid, axis=0)
-                return np.sum(rows) == 3 and np.sum(cols) == 3
+            # 2x2 (4 blocks) or 3x3 (9 blocks) with +/- 1 block tolerance
+            if 3 <= blocks <= 5: # 2x2 variant
+                return True
+            if 7 <= blocks <= 10: # 3x3 variant
+                return True
             return False
         elif category in ["corners", "l_shapes", "t_shapes", "zs_shapes", "diag_shapes"]:
-            # Complex shapes usually have 3-5 blocks
-            if not (3 <= blocks <= 5): return False
-            # Basic connectivity check: all blocks should be contiguous (Simplified)
-            return True # Best score + confidence threshold is primary guard here
+            # Complex shapes usually have 3-5 blocks. Loosen range.
+            return 2 <= blocks <= 6
             
-        return score > 0.9 # Default fallback for unknown categories
+        return score > 0.75 # Default fallback for unknown categories
 
     def learn_pattern(self, grid: np.ndarray):
         """[DISABLED in v2.1] - Managed templates only."""
