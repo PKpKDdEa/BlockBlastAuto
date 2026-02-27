@@ -291,7 +291,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
-    v2.6 Recovery: Fixed-grid sampling with 9-point Majority Vote and Alignment Jitter.
+    v2.8 Refinement: Fixed-grid sampling with 9-point Consensus and Expanded Jitter (12px).
     """
     if piece_region.size == 0:
         return None
@@ -303,23 +303,29 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Baseline center and size
     cw, ch = config.TRAY_CELL_SIZE
     
-    # JITTER SEARCH: Find best local (cx, cy) to maximize "vibrancy sharpness"
+    # JITTER SEARCH: Find best local (cx, cy) to maximize "vibrancy consensus"
     best_cx, best_cy = sw // 2, sh // 2
     best_sharpness = -1
     
-    # Search +/- 4px
-    for dy in range(-4, 5):
-        for dx in range(-4, 5):
+    # v2.8: Expand search to +/- 12px for high-offset pieces
+    # Center-heavy search (search middle first)
+    for dy in sorted(range(-12, 13), key=abs):
+        for dx in sorted(range(-12, 13), key=abs):
             cx, cy = sw // 2 + dx, sh // 2 + dy
             
-            # Simple score: how many cell centers are actually "on"?
+            # CONSENSUS SCORE: Count all 225 micro-points for extreme precision
             score = 0
             for r in range(5):
                 for c in range(5):
-                    px = int(cx + (c - 2) * cw)
-                    py = int(cy + (r - 2) * ch)
-                    if 0 <= px < sw and 0 <= py < sh and mask[py, px] > 0:
-                        score += 1
+                    cx_cell = int(cx + (c - 2) * cw)
+                    cy_cell = int(cy + (r - 2) * ch)
+                    offset = int(cw * 0.2)
+                    
+                    for my in [-offset, 0, offset]:
+                        for mx in [-offset, 0, offset]:
+                            px, py = cx_cell + mx, cy_cell + my
+                            if 0 <= px < sw and 0 <= py < sh and mask[py, px] > 0:
+                                score += 1
             
             if score > best_sharpness:
                 best_sharpness = score
@@ -327,7 +333,7 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
 
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
-    # MAJORITY VOTE SAMPLING
+    # FINAL SAMPLING WITH BEST JITTER
     for r in range(5):
         for c in range(5):
             # Center of the cell
