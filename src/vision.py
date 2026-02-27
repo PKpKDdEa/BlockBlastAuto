@@ -193,56 +193,66 @@ def read_board(frame: np.ndarray) -> Board:
 def classify_cell(patch: np.ndarray) -> bool:
     """
     Classifies a board cell as filled or empty.
-    v3.2: Increased threshold to avoid board background bleed.
+    v3.3: Uses Contrast-Boosted mask + adaptive threshold.
     """
     if patch.size == 0:
         return False
     
-    hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    # Pre-process with CLAHE for board (Value channel)
+    lab = cv2.cvtColor(patch, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    cl = clahe.apply(l)
+    limg = cv2.merge((cl, a, b))
+    patch_enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    
+    hsv = cv2.cvtColor(patch_enhanced, cv2.COLOR_BGR2HSV)
+    # For board, we still use a broad exclusion since background is fixed navy
     mask = get_piece_vibrancy_mask(hsv)
     
-    # v3.1 Brightness Guard: Empty cells are dark (dimmed)
-    val_channel = hsv[:, :, 2]
-    if np.mean(val_channel) < 80:
-        return False
-        
-    # v3.2: High threshold (140) to ignore dimmed board background
-    return np.mean(mask) > 140
+    # v3.3: Average mask value check (Filled blocks are very bright/distinct after CLAHE)
+    return np.mean(mask) > 160
 
 
-def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
+def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray] = None) -> np.ndarray:
     """
     Unified vibrancy-aware mask for pieces. 
-    v3.2: Surgical Hue Masking with high-saturation preservation.
+    v3.3: Adaptive Background Sampling + Low-Sat preservation.
     """
-    # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # v3.2: Baseline S=150 to catch dark but vibrant pieces
-    lower_vibrant = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    # Stage 1: Absolute Vibrancy
+    # After CLAHE, saturation is boosted, but we keep the gate at 120 for stability
+    lower_vibrant = np.array([0, 120, 60])
     upper_vibrant = np.array([180, 255, 255])
     mask_high_sat = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
-    # Stage 2: Color Selective (Green, Red, Yellow, Purple)
-    # We allow lower saturation for non-blue colors
-    lower_r1 = np.array([0, 100, 60])
-    upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
+    # Stage 2: Color Selective (Green, Red, Yellow, Cyan)
+    # We allow very low saturation for non-blue colors
+    lower_r1 = np.array([0, 60, 60])
+    upper_r1 = np.array([100, 255, 255]) # Cyan boundary at 100
     
-    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, 100, 60])
-    upper_r2 = np.array([180, 255, 255])
+    lower_r2 = np.array([145, 60, 60])
+    upper_r2 = np.array([180, 255, 255]) # Purple boundary at 145
     
     mask_r1 = cv2.inRange(hsv_img, lower_r1, upper_r1)
     mask_r2 = cv2.inRange(hsv_img, lower_r2, upper_r2)
     
-    # Stage 3: SURGICAL BLUE EXCLUSION (Specifically targets the Background)
-    # v3.2: Widened Hue [100-145] and Raised Saturation Gate to 220.
-    # MuMu background is S~160. Pieces are S~240.
-    lower_bg_blue = np.array([config.VISION_EXCLUDE_HUE_MIN, 0, 0])
-    upper_bg_blue = np.array([config.VISION_EXCLUDE_HUE_MAX, 220, 255])
-    mask_bg_blue = cv2.inRange(hsv_img, lower_bg_blue, upper_bg_blue)
+    # Stage 3: ADAPTIVE BACKGROUND REJECTION
+    # Sample the background if provided (or use MuMu defaults)
+    if bg_sample is not None:
+        bg_h, bg_s, bg_v = bg_sample[0]
+        # Reject anything within a tolerance of the actual slot background
+        lower_bg = np.array([max(0, bg_h-15), 0, 0])
+        upper_bg = np.array([min(180, bg_h+15), min(255, bg_s+40), 255])
+        mask_bg = cv2.inRange(hsv_img, lower_bg, upper_bg)
+    else:
+        # Default MuMu Navy rejection
+        lower_bg = np.array([100, 0, 0])
+        upper_bg = np.array([145, 190, 255])
+        mask_bg = cv2.inRange(hsv_img, lower_bg, upper_bg)
     
-    # Combined Logic:
-    # (High Saturation OR Selective Color) AND (NOT Background Blue)
+    # Final Logic: (Vibrant OR Selective) AND (NOT Background)
     mask = cv2.bitwise_or(mask_high_sat, cv2.bitwise_or(mask_r1, mask_r2))
-    mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg_blue))
+    mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg))
     
     # Cleanup noise
     kernel = np.ones((3, 3), np.uint8)
@@ -296,16 +306,29 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
-    v3.0 Precision: Contour-Driven Grid Scaling + Boundary Enforcement.
+    v3.3: Contrast-Boosted + Strict Margin Enforcement (d/2).
     """
     if piece_region.size == 0:
         return None
     
-    hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
-    mask = get_piece_vibrancy_mask(hsv)
+    # 1. Contrast Boosting (CLAHE) to pop dark pieces
+    lab = cv2.cvtColor(piece_region, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    cl = clahe.apply(l)
+    limg = cv2.merge((cl, a, b))
+    piece_enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    
+    hsv = cv2.cvtColor(piece_enhanced, cv2.COLOR_BGR2HSV)
+    
+    # 2. Adaptive Background Sampling from corner (5x5 px)
+    bg_patch = hsv[5:10, 5:10] # Top-left corner
+    bg_sample = np.mean(bg_patch, axis=(0, 1)).reshape(1, 3)
+    
+    mask = get_piece_vibrancy_mask(hsv, bg_sample=bg_sample)
     sh, sw = piece_region.shape[:2]
     
-    # 1. Use contours to find the piece boundary
+    # 3. Use contours to find the piece boundary
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
@@ -324,68 +347,61 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if not candidates:
         return None
         
-    # Closest to center is our piece
     best_cnt_data = min(candidates, key=lambda x: x[1])
     main_cnt = best_cnt_data[4]
     
-    # v3.2: Noise Filter - Relaxed to 95% to allow for 5x1 bars
+    # v3.3: High-confidence bounding box
     bx, by, bw, bh = cv2.boundingRect(main_cnt)
-    if bw > sw * 0.95 and bh > sh * 0.95:
-        if config.DEBUG: print(f"  [v3.2] Rejected: Contour too large ({bw}x{bh})")
-        return None
     
-    # v3.0: Snap to nearest 42px cell count
-    cols = int(round(bw / 42.0))
-    rows = int(round(bh / 42.0))
-    
-    # Bounds safety
+    # Infer grid dims
+    d = 42.0
+    cols = int(round(bw / d))
+    rows = int(round(bh / d))
     cols = max(1, min(5, cols))
     rows = max(1, min(5, rows))
     
-    # Anchor point: top-left cell center of the piece
     piece_cx = bx + bw / 2.0
     piece_cy = by + bh / 2.0
     
-    # Cell size
-    cw, ch = config.TRAY_CELL_SIZE
-    
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
-    
-    # 3. SAMPLE ONLY WITHIN THE DISCOVERED DIMENSIONS
-    # Calculate offset to center the inferred rows/cols within the 5x5 grid
     start_r = (5 - rows) // 2
     start_c = (5 - cols) // 2
     
+    # 4. SAMPLE WITH MARGIN ENFORCEMENT (d/2)
+    # dots should be at least d/2 (21px) from the border of contour
+    margin = d / 2.0
+    
     for r_idx in range(rows):
         for c_idx in range(cols):
-            # Calculate pixel center for this block cell
-            # The piece_cx/piece_cy is the center of the total object
-            # We need to offset from this center based on which block we are at
-            rel_cx = (c_idx - (cols - 1) / 2.0) * cw
-            rel_cy = (r_idx - (rows - 1) / 2.0) * ch
+            rel_cx = (c_idx - (cols - 1) / 2.0) * d
+            rel_cy = (r_idx - (rows - 1) / 2.0) * d
             
             cx_cell = int(piece_cx + rel_cx)
             cy_cell = int(piece_cy + rel_cy)
             
-            # Sub-grid consensus + Point Boundary Check
-            offset = int(cw * 0.22)
+            # Sub-grid consensus
+            offset = int(d * 0.22)
             points_on = 0
             
             for my in [-offset, 0, offset]:
                 for mx in [-offset, 0, offset]:
                     px, py = cx_cell + mx, cy_cell + my
                     if 0 <= px < sw and 0 <= py < sh:
-                        # v3.0: MUST be vibrant AND inside the polygon contour
-                        if mask[py, px] > 0 and cv2.pointPolygonTest(main_cnt, (float(px), float(py)), False) >= 0:
+                        # v3.3: Must be inside piece AND satisfy margin from edge
+                        # pointPolygonTest returns positive dist if inside
+                        dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(px), float(py)), True)
+                        
+                        # We require the dot to be vibrant and reasonably far from background bleed
+                        if mask[py, px] > 0 and dist_from_edge >= margin * 0.4: # Relaxed slightly for narrow pieces
                             points_on += 1
             
-            if points_on >= 4: # Lowered threshold (4/9) due to strict boundary exclusion
+            if points_on >= 4:
                 grid_5x5[start_r + r_idx, start_c + c_idx] = 1
                 
     if config.DEBUG:
         block_count = np.sum(grid_5x5)
         if block_count > 0:
-            print(f"  [v3.2 Precision] Inferred: {cols}x{rows} at ({piece_cx:.1f}, {piece_cy:.1f}) -> Blocks: {block_count}")
+            print(f"  [v3.3 Boosted] Inferred: {cols}x{rows} at ({piece_cx:.1f}, {piece_cy:.1f}) -> Blocks: {block_count}")
             
     return grid_5x5
 
@@ -493,16 +509,28 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
             cv2.circle(vis, (cx, cy), 3, color, -1)
     
-    # Draw piece slots and their internal relative grids (v3.0 Precision logic)
+    # Draw piece slots and their internal relative grids (v3.3 Precision logic)
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
         
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
-        hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
-        mask = get_piece_vibrancy_mask(hsv)
         
-        # 1. Exact duplicate of get_piece_grid v3.0 logic for viz sync
+        # v3.3 Enhanced pre-processing (CLAHE)
+        lab = cv2.cvtColor(piece_region, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        cl = clahe.apply(l)
+        limg = cv2.merge((cl, a, b))
+        piece_enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+        hsv = cv2.cvtColor(piece_enhanced, cv2.COLOR_BGR2HSV)
+        
+        # Adaptive Sample
+        bg_patch = hsv[5:10, 5:10]
+        bg_sample = np.mean(bg_patch, axis=(0, 1)).reshape(1, 3)
+        mask = get_piece_vibrancy_mask(hsv, bg_sample=bg_sample)
+        
+        # 1. Exact duplicate of get_piece_grid v3.3 logic for viz sync
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: continue
         
@@ -523,14 +551,15 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         bx, by, bw, bh = cv2.boundingRect(main_cnt)
         
         # Inferred dims
-        cols = int(round(bw / 42.0))
-        rows = int(round(bh / 42.0))
+        d = 42.0
+        cols = int(round(bw / d))
+        rows = int(round(bh / d))
         cols = max(1, min(5, cols))
         rows = max(1, min(5, rows))
         
         piece_cx = bx + bw / 2.0
         piece_cy = by + bh / 2.0
-        cw, ch = config.TRAY_CELL_SIZE
+        margin = d / 2.0
 
         # Draw the "White Bracket" (Tight Bounding Box)
         cv2.rectangle(vis, (slot.x + bx, slot.y + by), (slot.x + bx + bw, slot.y + by + bh), (255, 255, 255), 1)
@@ -538,20 +567,22 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         # Draw the inferred grid samples
         for r_idx in range(rows):
             for c_idx in range(cols):
-                rel_cx = (c_idx - (cols - 1) / 2.0) * cw
-                rel_cy = (r_idx - (rows - 1) / 2.0) * ch
+                rel_cx = (c_idx - (cols - 1) / 2.0) * d
+                rel_cy = (r_idx - (rows - 1) / 2.0) * d
                 
                 cx_cell = int(piece_cx + rel_cx)
                 cy_cell = int(piece_cy + rel_cy)
-                offset = int(cw * 0.22)
+                offset = int(d * 0.22)
                 
                 points_on = 0
                 for my in [-offset, 0, offset]:
                     for mx in [-offset, 0, offset]:
                         px, py = slot.x + cx_cell + mx, slot.y + cy_cell + my
                         if 0 <= cx_cell + mx < piece_region.shape[1] and 0 <= cy_cell + my < piece_region.shape[0]:
-                            # v3.0 boundary test
-                            is_on = mask[cy_cell + my, cx_cell + mx] > 0 and cv2.pointPolygonTest(main_cnt, (float(cx_cell+mx), float(cy_cell+my)), False) >= 0
+                            # v3.3 strict boundary + margin test
+                            dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(cx_cell+mx), float(cy_cell+my)), True)
+                            is_on = mask[cy_cell + my, cx_cell + mx] > 0 and dist_from_edge >= margin * 0.4
+                            
                             color = (0, 0, 255) if is_on else (100, 100, 100)
                             cv2.circle(vis, (px, py), 1, color, -1)
                             if is_on: points_on += 1
