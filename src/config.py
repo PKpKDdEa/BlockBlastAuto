@@ -88,12 +88,12 @@ class Config:
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
     
     # Vision Throttles (Aggressive Sensitivity)
-    VISION_SAT_THRESHOLD: int = 140
+    VISION_SAT_THRESHOLD: int = 150
     VISION_VAL_THRESHOLD: int = 60
     # Exclude Tray Blue-Gray Only if Saturation is low
-    # v3.1: Surgical MuMu background exclusion
-    VISION_EXCLUDE_HUE_MIN: int = 115
-    VISION_EXCLUDE_HUE_MAX: int = 135
+    # v3.2: Surgical MuMu background exclusion (wider range)
+    VISION_EXCLUDE_HUE_MIN: int = 100
+    VISION_EXCLUDE_HUE_MAX: int = 145
     
     # Debug & Control
     DEBUG: bool = True
