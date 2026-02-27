@@ -291,7 +291,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
-    v2.8 Refinement: Fixed-grid sampling with 9-point Consensus and Expanded Jitter (12px).
+    v2.9 Hybrid: Use Contour Detection for alignment and Majority Vote for sampling.
     """
     if piece_region.size == 0:
         return None
@@ -300,50 +300,51 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     mask = get_piece_vibrancy_mask(hsv)
     sh, sw = piece_region.shape[:2]
     
-    # Baseline center and size
-    cw, ch = config.TRAY_CELL_SIZE
+    # 1. Use contours to find the piece centroid for precise alignment
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
+        
+    candidates = []
+    for cnt in contours:
+        area = cv2.contourArea(cnt)
+        if area < 100: continue
+        M = cv2.moments(cnt)
+        if M["m00"] == 0: continue
+        cx_cnt = int(M["m10"] / M["m00"])
+        cy_cnt = int(M["m01"] / M["m00"])
+        # Dist from slot center
+        dist = abs(cx_cnt - sw//2) + abs(cy_cnt - sh//2)
+        candidates.append((area, dist, cx_cnt, cy_cnt, cnt))
+        
+    if not candidates:
+        return None
+        
+    # Pick the large-ish contour closest to the center
+    # This centers the grid on the actual piece, not the slot
+    best_cnt_data = min(candidates, key=lambda x: x[1])
+    best_cx, best_cy = best_cnt_data[2], best_cnt_data[3]
+    main_cnt = best_cnt_data[4]
     
-    # JITTER SEARCH: Find best local (cx, cy) to maximize "vibrancy consensus"
-    best_cx, best_cy = sw // 2, sh // 2
-    best_sharpness = -1
+    # Find bounding box of the piece to help snap grid alignment
+    bx, by, bw, bh = cv2.boundingRect(main_cnt)
     
-    # v2.8: Expand search to +/- 12px for high-offset pieces
-    # Center-heavy search (search middle first)
-    for dy in sorted(range(-12, 13), key=abs):
-        for dx in sorted(range(-12, 13), key=abs):
-            cx, cy = sw // 2 + dx, sh // 2 + dy
-            
-            # CONSENSUS SCORE: Count all 225 micro-points for extreme precision
-            score = 0
-            for r in range(5):
-                for c in range(5):
-                    cx_cell = int(cx + (c - 2) * cw)
-                    cy_cell = int(cy + (r - 2) * ch)
-                    offset = int(cw * 0.2)
-                    
-                    for my in [-offset, 0, offset]:
-                        for mx in [-offset, 0, offset]:
-                            px, py = cx_cell + mx, cy_cell + my
-                            if 0 <= px < sw and 0 <= py < sh and mask[py, px] > 0:
-                                score += 1
-            
-            if score > best_sharpness:
-                best_sharpness = score
-                best_cx, best_cy = cx, cy
+    # Snapping logic: adjust best_cx/cy to the center of the bounding box
+    best_cx = bx + bw // 2
+    best_cy = by + bh // 2
 
+    # Baseline cell size
+    cw, ch = config.TRAY_CELL_SIZE
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
-    # FINAL SAMPLING WITH BEST JITTER
+    # 2. Majority Vote Sampling based on the discovered center
     for r in range(5):
         for c in range(5):
-            # Center of the cell
             cx_cell = int(best_cx + (c - 2) * cw)
             cy_cell = int(best_cy + (r - 2) * ch)
+            offset = int(cw * 0.22) # Sampling radius
             
-            # 3x3 Micro-grid inside the cell (~20% of cell width/height)
-            offset = int(cw * 0.2)
             points_on = 0
-            
             for my in [-offset, 0, offset]:
                 for mx in [-offset, 0, offset]:
                     px, py = cx_cell + mx, cy_cell + my
@@ -351,14 +352,14 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
                         if mask[py, px] > 0:
                             points_on += 1
             
-            # Majority Vote: 5/9 points must be "on"
+            # Majority Vote: 5/9 points
             if points_on >= 5:
                 grid_5x5[r, c] = 1
                 
     if config.DEBUG:
         block_count = np.sum(grid_5x5)
         if block_count > 0:
-            print(f"  [v2.6 Recovery] Jitter Cleaned: ({best_cx-sw//2}, {best_cy-sh//2}) -> Blocks: {block_count}")
+            print(f"  [v2.9 Hybrid] Centered at: ({best_cx}, {best_cy}) -> Blocks: {block_count}")
             
     return grid_5x5
 
@@ -466,7 +467,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
             cv2.circle(vis, (cx, cy), 3, color, -1)
     
-    # Draw piece slots and their internal relative grids (v2.6 Recovery logic)
+    # Draw piece slots and their internal relative grids (v2.9 Hybrid logic)
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
         
@@ -478,27 +479,37 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         sh, sw = piece_region.shape[:2]
         cw, ch = config.TRAY_CELL_SIZE
         
-        # Exact duplicate of get_piece_grid jitter for viz sync
-        best_cx, best_cy = sw // 2, sh // 2
-        best_sharpness = -1
-        for dy in range(-4, 5):
-            for dx in range(-4, 5):
-                cx, cy = sw // 2 + dx, sh // 2 + dy
-                score = 0
-                for r in range(5):
-                    for c in range(5):
-                        px, py = int(cx + (c - 2) * cw), int(cy + (r - 2) * ch)
-                        if 0 <= px < sw and 0 <= py < sh and mask[py, px] > 0: score += 1
-                if score > best_sharpness:
-                    best_sharpness = score
-                    best_cx, best_cy = cx, cy
+        # Exact duplicate of get_piece_grid Hybrid Centering for viz sync
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours: continue
+        
+        candidates = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < 100: continue
+            M = cv2.moments(cnt)
+            if M["m00"] == 0: continue
+            cx_cnt = int(M["m10"] / M["m00"])
+            cy_cnt = int(M["m01"] / M["m00"])
+            dist = abs(cx_cnt - sw//2) + abs(cy_cnt - sh//2)
+            candidates.append((area, dist, cx_cnt, cy_cnt, cnt))
+            
+        if not candidates: continue
+        best_cnt_data = min(candidates, key=lambda x: x[1])
+        main_cnt = best_cnt_data[4]
+        bx, by, bw, bh = cv2.boundingRect(main_cnt)
+        best_cx = bx + bw // 2
+        best_cy = by + bh // 2
+
+        # Draw the "White Bracket" (Tight Bounding Box)
+        cv2.rectangle(vis, (slot.x + bx, slot.y + by), (slot.x + bx + bw, slot.y + by + bh), (255, 255, 255), 1)
 
         # Draw the micro-grid samples
         for r in range(5):
             for c in range(5):
                 cx_cell = int(best_cx + (c - 2) * cw)
                 cy_cell = int(best_cy + (r - 2) * ch)
-                offset = int(cw * 0.2)
+                offset = int(cw * 0.22)
                 
                 points_on = 0
                 for my in [-offset, 0, offset]:
@@ -510,10 +521,10 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                             cv2.circle(vis, (px, py), 1, color, -1)
                             if is_on: points_on += 1
                 
-                # If cell is ON, draw a green box
+                # If cell is ON, draw a green indicator box at the cell center
                 if points_on >= 5:
-                    cv2.rectangle(vis, (slot.x + cx_cell - 10, slot.y + cy_cell - 10), 
-                                  (slot.x + cx_cell + 10, slot.y + cy_cell + 10), (0, 255, 0), 1)
+                    cv2.rectangle(vis, (slot.x + cx_cell - 8, slot.y + cy_cell - 8), 
+                                  (slot.x + cx_cell + 8, slot.y + cy_cell + 8), (0, 255, 0), 1)
 
     return vis
 

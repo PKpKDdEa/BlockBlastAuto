@@ -44,7 +44,7 @@ class Config:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) / float(self.GRID_ROWS)
     
     # Tray configuration (Sampling pieces at bottom)
-    TRAY_CELL_SIZE: Tuple[int, int] = (45, 45)  # Calibrated size (v2.8 Refinement)
+    TRAY_CELL_SIZE: Tuple[int, int] = (42, 42)  # Calibrated size (v2.9 Hybrid)
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     PIECE_SLOTS: List[GameRegion] = None
     
@@ -88,12 +88,12 @@ class Config:
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
     
     # Vision Throttles (Aggressive Sensitivity)
-    VISION_SAT_THRESHOLD: int = 70
-    VISION_VAL_THRESHOLD: int = 50
+    VISION_SAT_THRESHOLD: int = 120
+    VISION_VAL_THRESHOLD: int = 40
     # Exclude Tray Blue-Gray Only if Saturation is low
-    # v2.8: Fixed range to [110, 137] to avoid Cyan/Blue pieces
-    VISION_EXCLUDE_HUE_MIN: int = 110
-    VISION_EXCLUDE_HUE_MAX: int = 137
+    # v2.9: Precise MuMu background range
+    VISION_EXCLUDE_HUE_MIN: int = 105
+    VISION_EXCLUDE_HUE_MAX: int = 135
     
     # Debug & Control
     DEBUG: bool = True
