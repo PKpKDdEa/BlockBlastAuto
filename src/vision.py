@@ -228,16 +228,16 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # v2.4: Lowered saturation threshold from 160 -> 100 to catch darker block edges.
-    lower_vibrant = np.array([0, 100, 50])
+    # v2.6 Recovery: Using 140 as a robust MuMu baseline.
+    lower_vibrant = np.array([0, 140, 60])
     upper_vibrant = np.array([180, 255, 255])
     mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
-    # Stage 2: Color Selective (Catches Red, Green, etc. while avoiding Tray Blue)
-    lower_r1 = np.array([0, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    # Stage 2: Color Selective (Avoid Tray Blue)
+    lower_r1 = np.array([0, 80, 80])
     upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
     
-    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, config.VISION_SAT_THRESHOLD, config.VISION_VAL_THRESHOLD])
+    lower_r2 = np.array([config.VISION_EXCLUDE_HUE_MAX, 80, 80])
     upper_r2 = np.array([180, 255, 255])
     
     mask_r1 = cv2.inRange(hsv_img, lower_r1, upper_r1)
@@ -250,8 +250,8 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     # Cleanup noise
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    # v2.4: Increased dilation to 2 iterations to fully bridge beveled edges
-    mask = cv2.dilate(mask, kernel, iterations=2)
+    # v2.6 Recovery: Single iteration to avoid merging into background.
+    mask = cv2.dilate(mask, kernel, iterations=1)
     
     return mask
 
@@ -296,77 +296,72 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
             
     return final_grid, match_info.get("is_new", False)
 
-            
-# Centroid and alignment tools removed in v2.3 as they were superseded by contour analysis.
-
 
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
-    v2.3: Uses Contour Bounding Box analysis to avoid fixed-grid overreading.
+    v2.6 Recovery: Fixed-grid sampling with 9-point Majority Vote and Alignment Jitter.
     """
     if piece_region.size == 0:
         return None
     
-    # 1. Generate High-Quality Mask
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
     mask = get_piece_vibrancy_mask(hsv)
     sh, sw = piece_region.shape[:2]
     
-    # 2. Isolate the main piece contour (Ignore noise/shadows)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return None
-        
-    # Pick largest central contour
-    main_contour = max(contours, key=cv2.contourArea)
-    if cv2.contourArea(main_contour) < 100: # Threshold for valid piece
-        return None
-        
-    # 3. Get Bounding Box and Inferred Scale
-    bx, by, bw, bh = cv2.boundingRect(main_contour)
+    # Baseline center and size
     cw, ch = config.TRAY_CELL_SIZE
     
-    # v2.4: Adding a safety buffer (10px) to the bounding box to account for shadows/bevels
-    bw += 10
-    bh += 10
+    # JITTER SEARCH: Find best local (cx, cy) to maximize "vibrancy sharpness"
+    best_cx, best_cy = sw // 2, sh // 2
+    best_sharpness = -1
     
-    # Estimate grid dimensions (cols/rows)
-    # v2.4: Use aggressive rounding (round up if > 0.4 of a cell is present)
-    cols = max(1, int((bw + cw * 0.6) // cw))
-    rows = max(1, int((bh + ch * 0.6) // ch))
-    
-    # Snap the cell size to the padded actual dimensions
-    cw_actual = bw / cols
-    ch_actual = bh / rows
-    
+    # Search +/- 4px
+    for dy in range(-4, 5):
+        for dx in range(-4, 5):
+            cx, cy = sw // 2 + dx, sh // 2 + dy
+            
+            # Simple score: how many cell centers are actually "on"?
+            score = 0
+            for r in range(5):
+                for c in range(5):
+                    px = int(cx + (c - 2) * cw)
+                    py = int(cy + (r - 2) * ch)
+                    if 0 <= px < sw and 0 <= py < sh and mask[py, px] > 0:
+                        score += 1
+            
+            if score > best_sharpness:
+                best_sharpness = score
+                best_cx, best_cy = cx, cy
+
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
-    # 4. Sample the grid segments
-    # Map the detected box into the center of the 5x5 grid
-    start_r = (5 - rows) // 2
-    start_c = (5 - cols) // 2
-    
-    for r in range(rows):
-        for c in range(cols):
-            # Target location in 5x5 grid
-            tr, tc = start_r + r, start_c + c
-            if not (0 <= tr < 5 and 0 <= tc < 5): continue
+    # MAJORITY VOTE SAMPLING
+    for r in range(5):
+        for c in range(5):
+            # Center of the cell
+            cx_cell = int(best_cx + (c - 2) * cw)
+            cy_cell = int(best_cy + (r - 2) * ch)
             
-            # Sampling coordinates in piece region
-            sample_x = int(bx + (c + 0.5) * cw_actual)
-            sample_y = int(by + (r + 0.5) * ch_actual)
+            # 3x3 Micro-grid inside the cell (~20% of cell width/height)
+            offset = int(cw * 0.2)
+            points_on = 0
             
-            # Use small 5x5 patch for verification at each cell center
-            pw, ph = int(cw_actual // 3), int(ch_actual // 3)
-            patch = mask[max(0, sample_y-ph):min(sh, sample_y+ph), 
-                         max(0, sample_x-pw):min(sw, sample_x+pw)]
+            for my in [-offset, 0, offset]:
+                for mx in [-offset, 0, offset]:
+                    px, py = cx_cell + mx, cy_cell + my
+                    if 0 <= px < sw and 0 <= py < sh:
+                        if mask[py, px] > 0:
+                            points_on += 1
             
-            if patch.size > 0 and np.mean(patch) > 100:
-                grid_5x5[tr, tc] = 1
+            # Majority Vote: 5/9 points must be "on"
+            if points_on >= 5:
+                grid_5x5[r, c] = 1
                 
     if config.DEBUG:
-        print(f"  [v2.3 Grid Fit] BBox: {bw}x{bh}px -> Est: {cols}x{rows} blocks (Cell: {cw_actual:.1f}x{ch_actual:.1f})")
+        block_count = np.sum(grid_5x5)
+        if block_count > 0:
+            print(f"  [v2.6 Recovery] Jitter Cleaned: ({best_cx-sw//2}, {best_cy-sh//2}) -> Blocks: {block_count}")
             
     return grid_5x5
 
@@ -474,7 +469,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
             cv2.circle(vis, (cx, cy), 3, color, -1)
     
-    # Draw piece slots and their internal relative grids (v2.3 logic)
+    # Draw piece slots and their internal relative grids (v2.6 Recovery logic)
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
         
@@ -483,32 +478,45 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
         mask = get_piece_vibrancy_mask(hsv)
         
-        # v2.3 Contour analysis for visual sync
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if contours:
-            main_contour = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(main_contour) > 100:
-                bx, by, bw, bh = cv2.boundingRect(main_contour)
-                cw, ch = config.TRAY_CELL_SIZE
+        sh, sw = piece_region.shape[:2]
+        cw, ch = config.TRAY_CELL_SIZE
+        
+        # Exact duplicate of get_piece_grid jitter for viz sync
+        best_cx, best_cy = sw // 2, sh // 2
+        best_sharpness = -1
+        for dy in range(-4, 5):
+            for dx in range(-4, 5):
+                cx, cy = sw // 2 + dx, sh // 2 + dy
+                score = 0
+                for r in range(5):
+                    for c in range(5):
+                        px, py = int(cx + (c - 2) * cw), int(cy + (r - 2) * ch)
+                        if 0 <= px < sw and 0 <= py < sh and mask[py, px] > 0: score += 1
+                if score > best_sharpness:
+                    best_sharpness = score
+                    best_cx, best_cy = cx, cy
+
+        # Draw the micro-grid samples
+        for r in range(5):
+            for c in range(5):
+                cx_cell = int(best_cx + (c - 2) * cw)
+                cy_cell = int(best_cy + (r - 2) * ch)
+                offset = int(cw * 0.2)
                 
-                # Sync with v2.4 logic
-                bw += 10
-                bh += 10
-                cols = max(1, int((bw + cw * 0.6) // cw))
-                rows = max(1, int((bh + ch * 0.6) // ch))
+                points_on = 0
+                for my in [-offset, 0, offset]:
+                    for mx in [-offset, 0, offset]:
+                        px, py = slot.x + cx_cell + mx, slot.y + cy_cell + my
+                        if 0 <= cx_cell + mx < sw and 0 <= cy_cell + my < sh:
+                            is_on = mask[cy_cell + my, cx_cell + mx] > 0
+                            color = (0, 0, 255) if is_on else (100, 100, 100)
+                            cv2.circle(vis, (px, py), 1, color, -1)
+                            if is_on: points_on += 1
                 
-                cw_actual = bw / cols
-                ch_actual = bh / rows
-                
-                # Draw the bounding box (Padded)
-                cv2.rectangle(vis, (slot.x + bx - 5, slot.y + by - 5), (slot.x + bx + bw - 5, slot.y + by + bh - 5), (0, 255, 255), 1)
-                
-                # Draw the inferred grid dots
-                for r in range(rows):
-                    for c in range(cols):
-                        px = int(slot.x + bx + (c + 0.5) * cw_actual)
-                        py = int(slot.y + by + (r + 0.5) * ch_actual)
-                        cv2.circle(vis, (px, py), 3, (0, 0, 255), -1)
+                # If cell is ON, draw a green box
+                if points_on >= 5:
+                    cv2.rectangle(vis, (slot.x + cx_cell - 10, slot.y + cy_cell - 10), 
+                                  (slot.x + cx_cell + 10, slot.y + cy_cell + 10), (0, 255, 0), 1)
 
     return vis
 

@@ -44,7 +44,7 @@ class Config:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) / float(self.GRID_ROWS)
     
     # Tray configuration (Sampling pieces at bottom)
-    TRAY_CELL_SIZE: Tuple[int, int] = (30, 30)  # Calibrated size of a single block in the tray
+    TRAY_CELL_SIZE: Tuple[int, int] = (42, 42)  # Calibrated size of a single block in the tray (Updated v2.6 Recovery)
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     PIECE_SLOTS: List[GameRegion] = None
     
