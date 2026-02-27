@@ -62,9 +62,11 @@ class TemplateManager:
                 score = int_sum / float(uni_sum)
                 
                 if score > best_score:
-                    best_score = score
-                    best_match = template
-                    best_name = f"{category}/{name}"
+                    # v2.3: Mass-Awareness. Check if the candidate matching blocks actually exists.
+                    if self.check_mass_mismatch(grid, template):
+                        best_score = score
+                        best_match = template
+                        best_name = f"{category}/{name}"
         
         # 2. Shape Validation Rules (Geometry Enforcement)
         is_valid = self.validate_shape(grid, best_name, best_score)
@@ -123,6 +125,17 @@ class TemplateManager:
             return 2 <= blocks <= 6
             
         return score > 0.75 # Default fallback for unknown categories
+
+    def check_mass_mismatch(self, grid: np.ndarray, template: np.ndarray) -> bool:
+        """
+        Check if the total volume (number of blocks) is vastly different.
+        Prevents a 4-block piece from matching a 9-block square.
+        """
+        visual_blocks = np.sum(grid)
+        template_blocks = np.sum(template)
+        
+        # Allow +/- 1 block variance for noise
+        return abs(visual_blocks - template_blocks) <= 2
 
     def learn_pattern(self, grid: np.ndarray):
         """[DISABLED in v2.1] - Managed templates only."""
@@ -215,8 +228,8 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # Background tray is usually saturation < 160. Pieces are high.
-    lower_vibrant = np.array([0, 160, 60])
+    # v2.4: Lowered saturation threshold from 160 -> 100 to catch darker block edges.
+    lower_vibrant = np.array([0, 100, 50])
     upper_vibrant = np.array([180, 255, 255])
     mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
@@ -237,8 +250,8 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     # Cleanup noise
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    # Dilate slightly to bridge beveled edges
-    mask = cv2.dilate(mask, kernel, iterations=1)
+    # v2.4: Increased dilation to 2 iterations to fully bridge beveled edges
+    mask = cv2.dilate(mask, kernel, iterations=2)
     
     return mask
 
@@ -284,126 +297,76 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
     return final_grid, match_info.get("is_new", False)
 
             
-def find_piece_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
-    """Calculates the visual center of mass for a piece mask."""
-    M = cv2.moments(mask)
-    if M["m00"] > 100: # Minimum area threshold
-        cx = int(M["m10"] / M["m00"])
-        cy = int(M["m01"] / M["m00"])
-        return cx, cy
-    return None
-
-
-def find_best_alignment(mask: np.ndarray, initial_cx: int, initial_cy: int, cw: int, ch: int) -> Tuple[int, int]:
-    """
-    Search for the optimal local offset that maximizes matching score (IoU).
-    Prioritizes the best 'fit' to a template, with a centroid bias for tie-breaking.
-    """
-    sh, sw = mask.shape[:2]
-    best_cx, best_cy = initial_cx, initial_cy
-    best_score = -1.0
-    best_dist = float('inf')
-    found_template_match = False
-    
-    # Range of search: +/- 6 pixels
-    search_range = 6
-    
-    for dy in range(-search_range, search_range + 1):
-        for dx in range(-search_range, search_range + 1):
-            cx, cy = initial_cx + dx, initial_cy + dy
-            
-            # Construct a temporary 5x5 grid for this specific center
-            temp_grid = np.zeros((5, 5), dtype=np.uint8)
-            for r in range(5):
-                for c in range(5):
-                    px = int(cx + (c - 2) * cw)
-                    py = int(cy + (r - 2) * ch)
-                    if 0 <= px < sw and 0 <= py < sh:
-                        margin_x, margin_y = int(cw // 2), int(ch // 2)
-                        patch = mask[max(0, int(py-margin_y)):min(sh, int(py+margin_y+1)), 
-                                     max(0, int(px-margin_x)):min(sw, int(px+margin_x+1))]
-                        if patch.size > 0 and np.mean(patch) > 100:
-                            temp_grid[r, c] = 1
-            
-            cell_count = np.sum(temp_grid)
-            if cell_count == 0:
-                continue
-                
-            # Check matching score (IoU) against template library
-            # threshold=0.8 is standard for match_and_validate
-            _, score, name, _ = template_manager.match_and_validate(temp_grid, threshold=0.8)
-            
-            # Distance from initial centroid (Centroid Bias)
-            dist = (dx**2 + dy**2)**0.5
-            
-            # PRIORITY LOGIC:
-            # 1. Higher matching score
-            # 2. Tie-break with smaller distance from centroid
-            if score > best_score:
-                best_score = score
-                best_dist = dist
-                best_cx, best_cy = cx, cy
-            elif abs(score - best_score) < 0.01: # Tie-break
-                if dist < best_dist:
-                    best_dist = dist
-                    best_cx, best_cy = cx, cy
-                
-    return best_cx, best_cy
+# Centroid and alignment tools removed in v2.3 as they were superseded by contour analysis.
 
 
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
-    Samples at fixed calibrated offsets from the center of the region.
+    v2.3: Uses Contour Bounding Box analysis to avoid fixed-grid overreading.
     """
     if piece_region.size == 0:
         return None
     
-    # HSV for vibrancy check
+    # 1. Generate High-Quality Mask
     hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
-    
-    # Use unified mask logic
     mask = get_piece_vibrancy_mask(hsv)
     sh, sw = piece_region.shape[:2]
     
-    # CENTROID DETECTION (Auto-centering)
-    centroid = find_piece_centroid(mask)
-    if centroid:
-        cx, cy = centroid
-    else:
-        cx, cy = sw // 2, sh // 2
+    # 2. Isolate the main piece contour (Ignore noise/shadows)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None
         
+    # Pick largest central contour
+    main_contour = max(contours, key=cv2.contourArea)
+    if cv2.contourArea(main_contour) < 100: # Threshold for valid piece
+        return None
+        
+    # 3. Get Bounding Box and Inferred Scale
+    bx, by, bw, bh = cv2.boundingRect(main_contour)
     cw, ch = config.TRAY_CELL_SIZE
     
-    # ADAPTIVE ALIGNMENT (Sharpness Jitter)
-    cx, cy = find_best_alignment(mask, cx, cy, cw, ch)
+    # v2.4: Adding a safety buffer (10px) to the bounding box to account for shadows/bevels
+    bw += 10
+    bh += 10
+    
+    # Estimate grid dimensions (cols/rows)
+    # v2.4: Use aggressive rounding (round up if > 0.4 of a cell is present)
+    cols = max(1, int((bw + cw * 0.6) // cw))
+    rows = max(1, int((bh + ch * 0.6) // ch))
+    
+    # Snap the cell size to the padded actual dimensions
+    cw_actual = bw / cols
+    ch_actual = bh / rows
     
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     
-    for r in range(5):
-        for c in range(5):
-            # Sample at (r-2, c-2) relative to center using float math
-            px = int(cx + (c - 2) * float(cw))
-            py = int(cy + (r - 2) * float(ch))
+    # 4. Sample the grid segments
+    # Map the detected box into the center of the 5x5 grid
+    start_r = (5 - rows) // 2
+    start_c = (5 - cols) // 2
+    
+    for r in range(rows):
+        for c in range(cols):
+            # Target location in 5x5 grid
+            tr, tc = start_r + r, start_c + c
+            if not (0 <= tr < 5 and 0 <= tc < 5): continue
             
-            # Bound check
-            if 0 <= px < sw and 0 <= py < sh:
-                # Continuous Sampling: Patch touches neighbors (Zero Spacing)
-                margin_x, margin_y = int(cw // 2), int(ch // 2)
-                patch = mask[max(0, int(py-margin_y)):min(sh, int(py+margin_y+1)), 
-                             max(0, int(px-margin_x)):min(sw, int(px+margin_x+1))]
+            # Sampling coordinates in piece region
+            sample_x = int(bx + (c + 0.5) * cw_actual)
+            sample_y = int(by + (r + 0.5) * ch_actual)
+            
+            # Use small 5x5 patch for verification at each cell center
+            pw, ph = int(cw_actual // 3), int(ch_actual // 3)
+            patch = mask[max(0, sample_y-ph):min(sh, sample_y+ph), 
+                         max(0, sample_x-pw):min(sw, sample_x+pw)]
+            
+            if patch.size > 0 and np.mean(patch) > 100:
+                grid_5x5[tr, tc] = 1
                 
-                if patch.size > 0 and np.mean(patch) > 100:
-                    grid_5x5[r, c] = 1
-                    
-    # Diagnostic: Print average HSV of center cell if we found "too many" or "no" blocks
     if config.DEBUG:
-        center_patch = hsv[max(0, int(cy-5)):min(sh, int(cy+5)), max(0, int(cx-5)):min(sw, int(cx+5))]
-        avg_hsv = np.mean(center_patch, axis=(0, 1)).astype(int)
-        # If the grid is totally full (25) or empty (0), log the center color
-        block_count = np.sum(grid_5x5)
-        if block_count == 25 or block_count == 0:
-            print(f"  [Slot Diagnostic] Center HSV: {avg_hsv} -> Blocks: {block_count}")
+        print(f"  [v2.3 Grid Fit] BBox: {bw}x{bh}px -> Est: {cols}x{rows} blocks (Cell: {cw_actual:.1f}x{ch_actual:.1f})")
             
     return grid_5x5
 
@@ -511,42 +474,41 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
             cv2.circle(vis, (cx, cy), 3, color, -1)
     
-    # Draw piece slots and their internal relative grids
+    # Draw piece slots and their internal relative grids (v2.3 logic)
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
         
-        # Determine the piece's actual boundaries for overlay
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
         hsv = cv2.cvtColor(piece_region, cv2.COLOR_BGR2HSV)
         mask = get_piece_vibrancy_mask(hsv)
         
-        sh, sw = slot.height, slot.width
-        cx_rel, cy_rel = sw // 2, sh // 2
-        cw, ch = config.TRAY_CELL_SIZE
-        
-        # CENTROID DETECTION + ADAPTIVE ALIGNMENT (Sync Viz with Logic)
-        centroid = find_piece_centroid(mask)
-        if centroid:
-            cx_rel, cy_rel = find_best_alignment(mask, centroid[0], centroid[1], cw, ch)
-            # Draw the refined centroid dot (Target)
-            cv2.circle(vis, (slot.x + int(cx_rel), slot.y + int(cy_rel)), 4, (255, 100, 0), -1)
-            
-        # Draw the 5x5 digital grid for verification
-        for r in range(5):
-            for c in range(5):
-                px = int(slot.x + cx_rel + (c - 2) * cw)
-                py = int(slot.y + cy_rel + (r - 2) * ch)
+        # v2.3 Contour analysis for visual sync
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            main_contour = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(main_contour) > 100:
+                bx, by, bw, bh = cv2.boundingRect(main_contour)
+                cw, ch = config.TRAY_CELL_SIZE
                 
-                # Check if this cell is filled in the detect grid
-                # Use EXACT same logic as get_piece_grid for visual sync
-                margin_x, margin_y = cw // 2, ch // 2
-                patch = mask[max(0, int(py - slot.y - margin_y)):min(sh, int(py - slot.y + margin_y + 1)), 
-                             max(0, int(px - slot.x - margin_x)):min(sw, int(px - slot.x + margin_x + 1))]
-                             
-                if patch.size > 0 and np.mean(patch) > 100:
-                    cv2.rectangle(vis, (px-10, py-10), (px+10, py+10), (0, 255, 0), 1)
-                    cv2.circle(vis, (px, py), 3, (0, 0, 255), -1)
+                # Sync with v2.4 logic
+                bw += 10
+                bh += 10
+                cols = max(1, int((bw + cw * 0.6) // cw))
+                rows = max(1, int((bh + ch * 0.6) // ch))
+                
+                cw_actual = bw / cols
+                ch_actual = bh / rows
+                
+                # Draw the bounding box (Padded)
+                cv2.rectangle(vis, (slot.x + bx - 5, slot.y + by - 5), (slot.x + bx + bw - 5, slot.y + by + bh - 5), (0, 255, 255), 1)
+                
+                # Draw the inferred grid dots
+                for r in range(rows):
+                    for c in range(cols):
+                        px = int(slot.x + bx + (c + 0.5) * cw_actual)
+                        py = int(slot.y + by + (r + 0.5) * ch_actual)
+                        cv2.circle(vis, (px, py), 3, (0, 0, 255), -1)
 
     return vis
 
