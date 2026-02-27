@@ -20,7 +20,7 @@ class Config:
     """Main configuration for the Block Blast bot."""
     
     # Window detection
-    WINDOW_TITLE: str = "雷電模擬器"  # Supports Chinese localized LDPlayer
+    WINDOW_TITLE: str = "Android Device"  # Targeting MuMu Emulator as seen in process list
     
     # Game region (will be calibrated)
     # Default values for 1080x1920 resolution
@@ -36,12 +36,12 @@ class Config:
     
     # Computed cell dimensions
     @property
-    def CELL_WIDTH(self) -> int:
-        return (self.GRID_BOTTOM_RIGHT[0] - self.GRID_TOP_LEFT[0]) // self.GRID_COLS
+    def CELL_WIDTH(self) -> float:
+        return (self.GRID_BOTTOM_RIGHT[0] - self.GRID_TOP_LEFT[0]) / float(self.GRID_COLS)
     
     @property
-    def CELL_HEIGHT(self) -> int:
-        return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) // self.GRID_ROWS
+    def CELL_HEIGHT(self) -> float:
+        return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) / float(self.GRID_ROWS)
     
     # Tray configuration (Sampling pieces at bottom)
     TRAY_CELL_SIZE: Tuple[int, int] = (30, 30)  # Calibrated size of a single block in the tray

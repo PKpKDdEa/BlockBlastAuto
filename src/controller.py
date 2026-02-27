@@ -83,29 +83,70 @@ def move_mouse_and_drag(start_xy: Tuple[int, int], end_xy: Tuple[int, int], dura
 
 def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     """
-    Drag a piece from its slot to a target cell on the board.
+    Drag a piece from its slot to a target position on the board.
+    Optimized for MuMu emulator with dynamic line-based offsets.
     """
     start_pos = piece_slot_center(piece.id)
-    top_left_cell_pos = cell_center(target_row, target_col)
     
-    # Calculate scaling vertical offset
-    y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
-    progress = max(0, min(1, (y_bottom - top_left_cell_pos[1]) / (y_bottom - y_top)))
-    current_offset_y = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
+    # Target line index (1 to 7)
+    # Line 1 is between Row 0 and 1
+    # Line 7 is between Row 6 and 7
+    # For a piece starting at target_row, its center relative to lines:
+    piece_center_row = target_row + (piece.height / 2.0)
     
-    # Visual center offset in pixels
+    # Determine reference line (the line closest to or at the piece's vertical center)
+    # Even rows (relative to lines): align center to line
+    # Odd rows (relative to lines): align center to cell
+    
+    ref_line = round(piece_center_row) 
+    # Bounds check ref_line (1-7)
+    ref_line = max(1, min(7, ref_line))
+    
+    # MuMu Offset Table
+    # Line 1: 4.2, Line 2: 4.0, Line 3: 3.6, Line 4: 3.2, Line 5: 3.2, Line 6: 2.5, Line 7: 2.5
+    offsets = {
+        1: 4.2, 2: 4.0, 3: 3.6, 4: 3.2, 5: 3.2, 6: 2.5, 7: 2.5
+    }
+    multiplier = offsets.get(ref_line, 2.5)
+    
+    y_offset = multiplier * config.CELL_HEIGHT
+    x_offset = piece.height * 0.4 * config.CELL_WIDTH
+    
+    # Screen position of the target cell (top-left of piece anchor)
+    anchor_center_x, anchor_center_y = cell_center(target_row, target_col)
+    
+    # Adjust for piece size (anchor is at 0,0 in Piece.cells)
+    # Visual center of the piece in grid units
     anchor_dr, anchor_dc = piece.anchor_offset
-    dest_x = top_left_cell_pos[0] + int(anchor_dc * config.CELL_WIDTH)
-    dest_y = top_left_cell_pos[1] + int(anchor_dr * config.CELL_HEIGHT) + current_offset_y
     
-    end_pos_offset = (dest_x, dest_y)
+    dest_x = anchor_center_x + int(anchor_dc * config.CELL_WIDTH) + int(x_offset)
+    dest_y = anchor_center_y + int(anchor_dr * config.CELL_HEIGHT) + int(y_offset)
+    
+    # Alignment Rule: 
+    # "place the object block with even number row's center on the line 
+    #  and odd number row's center on the target cell"
+    # Even number of rows -> center is on a line
+    # Odd number of rows -> center is in a cell center
+    
+    if piece.height % 2 == 0:
+        # Align to nearest line
+        line_y = config.GRID_TOP_LEFT[1] + ref_line * config.CELL_HEIGHT
+        # Note: cell_center already adds 0.5 * cell_h, so anchor_center_y is at row + 0.5
+        # We need to shift to the line
+        dest_y = line_y + int(y_offset)
+    else:
+        # Align to cell center (already handled by anchor_center_y + anchor_dr)
+        pass
+
+    end_pos = (dest_x, dest_y)
     
     if config.DEBUG:
         print(f"Dragging piece {piece.id} to board ({target_row}, {target_col})")
-        print(f"  Target Cell: {top_left_cell_pos}, Offset: {current_offset_y}, Anchor: {piece.anchor_offset}")
-        print(f"  Final Cursor Target: {end_pos_offset}")
+        print(f"  Line: {ref_line}, Multiplier: {multiplier}, Rows: {piece.height}")
+        print(f"  Offsets: X={int(x_offset)}, Y={int(y_offset)}")
+        print(f"  Final Cursor Target: {end_pos}")
     
-    move_mouse_and_drag(start_pos, end_pos_offset)
+    move_mouse_and_drag(start_pos, end_pos)
 
 
 def click_position(x: int, y: int) -> None:

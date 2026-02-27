@@ -29,11 +29,11 @@ def main():
     import json
     print(json.dumps(current_weights, indent=4))
     
-    print("\nLooking for LDPlayer window...")
+    print("\nLooking for MuMu window...")
     capture = WindowCapture()
     
     if not capture.find_window():
-        print("ERROR: Could not find LDPlayer window!")
+        print("ERROR: Could not find MuMu window!")
         return
     
     print(f"✓ Found window: {capture.window_title}")
@@ -158,7 +158,7 @@ def main():
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
                 click_xy = (end_xy[0], end_xy[1] + current_offset)
                 
-                vis_drag = visualize_drag(vis, move, start_xy, click_xy, end_xy)
+                vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy)
                 cv2.imshow("Bot Vision", vis_drag)
                 cv2.waitKey(1)
                 

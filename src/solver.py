@@ -10,33 +10,51 @@ def evaluate_board(board: Board) -> float:
     """
     score = 0.0
     
-    # 1. Empty cells
-    empty_cells = np.sum(board.grid == 0)
+    # 1. Empty cells (count zeros)
+    # Using python's bit_count (Python 3.10+) or alternative
+    occupied_count = bin(board.bitboard).count('1')
+    empty_cells = 64 - occupied_count
     score += empty_cells * config.WEIGHT_EMPTY_CELLS
     
-    # 2. Holes penalty
-    holes = 0
-    for r in range(board.rows):
-        for c in range(board.cols):
-            if board.grid[r, c] == 0:
-                is_hole = False
-                if (c > 0 and board.grid[r, c-1] == 1) and (c < board.cols-1 and board.grid[r, c+1] == 1):
-                    is_hole = True
-                if (r > 0 and board.grid[r-1, c] == 1) and (r < board.rows-1 and board.grid[r+1, c] == 1):
-                    is_hole = True
-                if is_hole:
-                    holes += 1
+    # 2. Holes penalty (Cells that are empty but surrounded by filled cells)
+    # A simple way: empty cells that have filled neighbors in 4 directions
+    # With bitboards, we can shift to find neighbors
+    b = board.bitboard
+    empty = (~b) & 0xFFFFFFFFFFFFFFFF
+    
+    # Find empty cells with filled neighbors
+    # This is a proxy for holes that is fast to compute
+    up = (b >> 8)
+    down = (b << 8) & 0xFFFFFFFFFFFFFFFF
+    left = (b >> 1) & 0x7F7F7F7F7F7F7F7F
+    right = (b << 1) & 0xFEFEFEFEFEFEFEFE
+    
+    # Hole candidate: empty cell with at least 2 filled neighbors (horizontal or vertical trap)
+    # This matches the user's previous logic in a vectorized way
+    horizontal_trap = empty & (left & right)
+    vertical_trap = empty & (up & down)
+    holes = bin(horizontal_trap | vertical_trap).count('1')
+    
     score += holes * config.WEIGHT_HOLES_PENALTY
     
-    # 3. Bumpiness
+    # 3. Bumpiness (Height differences between columns)
+    # Harder to do purely bitwise, but we can get column heights
     heights = []
-    for c in range(board.cols):
-        h = 0
-        for r in range(board.rows):
-            if board.grid[r, c] == 1:
-                h = board.rows - r
-                break
-        heights.append(h)
+    for c in range(8):
+        col_mask = 0x0101010101010101 << c
+        col_data = (b & col_mask) >> c
+        if col_data == 0:
+            heights.append(0)
+        else:
+            # Find the highest bit set in this column
+            # Bits are at 0, 8, 16, 24, 32, 40, 48, 56
+            # We want the max r where (1 << (r*8)) is set
+            h = 0
+            for r in range(8):
+                if col_data & (1 << (r * 8)):
+                    h = 8 - r
+                    break
+            heights.append(h)
     
     bumpiness = 0
     for i in range(len(heights) - 1):
@@ -45,15 +63,22 @@ def evaluate_board(board: Board) -> float:
     
     # 4. Near-complete lines
     near_complete = 0
-    for r in range(board.rows):
-        empty_in_row = np.sum(board.grid[r, :] == 0)
+    for r in range(8):
+        row_mask = 0xFF << (r * 8)
+        row_bits = (b & row_mask) >> (r * 8)
+        empty_in_row = 8 - bin(row_bits).count('1')
         if 1 <= empty_in_row <= 2:
             near_complete += 1
     
-    for c in range(board.cols):
-        empty_in_col = np.sum(board.grid[:, c] == 0)
+    for c in range(8):
+        col_mask = 0x0101010101010101 << c
+        col_bits = (b & col_mask)
+        # Shift bits to be contiguous for counting effectively
+        # Or just count '1's in the sparse bitmask
+        empty_in_col = 8 - bin(col_bits).count('1')
         if 1 <= empty_in_col <= 2:
             near_complete += 1
+            
     score += near_complete * config.WEIGHT_NEAR_COMPLETE
     
     # 5. Combo streak bonus
@@ -65,25 +90,29 @@ def evaluate_board(board: Board) -> float:
 def find_sequence_best_move(board: Board, pieces: List[Piece], depth: int = 0, max_depth: int = 99) -> Tuple[float, Optional[List[Move]]]:
     """
     Find the best sequence of moves for all available pieces using depth-first search.
+    Optimized with bitboards.
     """
     if not pieces or depth >= max_depth:
-        # Heuristic score for final state plus actual game score earned
         return board.total_score + evaluate_board(board), []
     
     best_score = float('-inf')
     best_seq = None
     
-    # Try all available pieces as the first piece in this subsequence
+    # Bitboard optimization: we can iterate through possible placements very quickly
     for i, piece in enumerate(pieces):
         remaining_pieces = pieces[:i] + pieces[i+1:]
         
-        # Generate legal moves efficiently
-        for r in range(board.rows):
-            for c in range(board.cols):
-                if is_legal(board, piece, r, c):
+        # Limit search space to valid bounds for this piece
+        for r in range(board.rows - piece.height + 1):
+            row_shift = r * 8
+            for c in range(board.cols - piece.width + 1):
+                piece_mask = piece.bitmask << (row_shift + c)
+                
+                # Fast bitwise collision check
+                if (board.bitboard & piece_mask) == 0:
+                    # Apply move (bitboard only for deeper search, board.copy handles the rest)
                     new_board, _, _ = apply_move(board, piece, r, c)
                     
-                    # Recursive call for remaining pieces
                     score, seq = find_sequence_best_move(new_board, remaining_pieces, depth + 1, max_depth)
                     
                     if score > best_score:
@@ -97,22 +126,17 @@ def best_move(board: Board, pieces: List[Piece], time_budget_ms: int = None) -> 
     """
     Compute the best move by looking at the entire sequence of available pieces.
     """
-    # Filter out None pieces (empty slots)
     valid_pieces = [p for p in pieces if p is not None]
     if not valid_pieces:
         return None
         
-    print(f"Solving for {len(valid_pieces)} pieces sequence...")
-    
-    # Fast solver mode: if board is > 70% empty, only look 1 piece deep
-    # 64 * 0.7 = 44.8
-    empty_cells = np.sum(board.grid == 0)
+    # Bitboard solver is fast enough to always look ahead if pieces <= 3
+    # but we keep the depth limit logic for safety
+    empty_cells = 64 - bin(board.bitboard).count('1')
     max_depth = 99
     if empty_cells > 45:
-        print("  Fast Solver Mode (Board > 70% empty)")
-        max_depth = 1
+        max_depth = 1 # Still use fast mode for very empty boards to save time
         
-    # Find the best sequence
     best_score, best_seq = find_sequence_best_move(board, valid_pieces, max_depth=max_depth)
     
     if best_seq and len(best_seq) > 0:

@@ -72,8 +72,9 @@ class TemplateManager:
             "is_new": best_score < threshold and np.sum(grid) > 0
         }
 
-        # 1. High Confidence SNAPPING
-        if best_match is not None and best_score >= threshold:
+        # 1. High Confidence SNAPPING (Improved for User Request)
+        # If we have any match above 0.5, force snap it to avoid "new-pattern"
+        if best_match is not None and best_score >= 0.5:
             return best_match, best_score, best_name, match_info
             
         # 2. NOISE FILTERING
@@ -81,7 +82,8 @@ class TemplateManager:
         if best_score < 0.3 and block_count > 12:
             return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise", match_info
             
-        return grid, best_score, "new-pattern" if block_count > 0 else "empty", match_info
+        # If no match > 0.5, return as is but label as unknown instead of new-pattern
+        return grid, best_score, "unknown", match_info
         
     def learn_pattern(self, grid: np.ndarray):
         """Save a new verified pattern to the library."""
@@ -137,16 +139,16 @@ def read_board(frame: np.ndarray) -> Board:
     # Process each cell
     for row in range(config.GRID_ROWS):
         for col in range(config.GRID_COLS):
-            # Calculate cell center
-            cell_x = col * config.CELL_WIDTH + config.CELL_WIDTH // 2
-            cell_y = row * config.CELL_HEIGHT + config.CELL_HEIGHT // 2
+            # Use float-based centers to avoid cumulative rounding drift
+            cell_x = int(col * config.CELL_WIDTH + config.CELL_WIDTH / 2)
+            cell_y = int(row * config.CELL_HEIGHT + config.CELL_HEIGHT / 2)
             
             # Extract small patch around center
-            patch_size = min(config.CELL_WIDTH, config.CELL_HEIGHT) // 3
-            y_start = max(0, cell_y - patch_size // 2)
-            y_end = min(grid_region.shape[0], cell_y + patch_size // 2)
-            x_start = max(0, cell_x - patch_size // 2)
-            x_end = min(grid_region.shape[1], cell_x + patch_size // 2)
+            patch_size = int(min(config.CELL_WIDTH, config.CELL_HEIGHT) // 3)
+            y_start = int(max(0, cell_y - patch_size // 2))
+            y_end = int(min(grid_region.shape[0], cell_y + patch_size // 2))
+            x_start = int(max(0, cell_x - patch_size // 2))
+            x_end = int(min(grid_region.shape[1], cell_x + patch_size // 2))
             
             patch = grid_region[y_start:y_end, x_start:x_end]
             
@@ -279,35 +281,57 @@ def find_piece_centroid(mask: np.ndarray) -> Optional[Tuple[int, int]]:
 
 def find_best_alignment(mask: np.ndarray, initial_cx: int, initial_cy: int, cw: int, ch: int) -> Tuple[int, int]:
     """
-    Search for the optimal local offset that maximizes sampling 'sharpness'.
-    'Sharpness' is defined as the average distance of sample patches from the 0.5 threshold.
+    Search for the optimal local offset that maximizes matching score (IoU).
+    Prioritizes the best 'fit' to a template, with a centroid bias for tie-breaking.
     """
     sh, sw = mask.shape[:2]
     best_cx, best_cy = initial_cx, initial_cy
-    max_sharpness = -1.0
+    best_score = -1.0
+    best_dist = float('inf')
+    found_template_match = False
     
-    # Search a small window around the centroid (+/- 4 pixels)
-    for dy in range(-4, 5):
-        for dx in range(-4, 5):
+    # Range of search: +/- 6 pixels
+    search_range = 6
+    
+    for dy in range(-search_range, search_range + 1):
+        for dx in range(-search_range, search_range + 1):
             cx, cy = initial_cx + dx, initial_cy + dy
             
-            # Simple sharpness metric: Sum of (abs(mean - 0.5) * 2) for all 25 cells
-            current_sharpness = 0.0
+            # Construct a temporary 5x5 grid for this specific center
+            temp_grid = np.zeros((5, 5), dtype=np.uint8)
             for r in range(5):
                 for c in range(5):
-                    px, py = cx + (c - 2) * cw, cy + (r - 2) * ch
+                    px = int(cx + (c - 2) * cw)
+                    py = int(cy + (r - 2) * ch)
                     if 0 <= px < sw and 0 <= py < sh:
-                        m_x, m_y = cw // 2, ch // 2
-                        patch = mask[max(0, py-m_y):min(sh, py+m_y+1), 
-                                     max(0, px-m_x):min(sw, px+m_x+1)]
-                        if patch.size > 0:
-                            mean_val = np.mean(patch) / 255.0
-                            # Sharpness is how far we are from the "uncertain" 0.5 value
-                            current_sharpness += abs(mean_val - 0.5) * 2.0
+                        margin_x, margin_y = int(cw // 2), int(ch // 2)
+                        patch = mask[max(0, int(py-margin_y)):min(sh, int(py+margin_y+1)), 
+                                     max(0, int(px-margin_x)):min(sw, int(px+margin_x+1))]
+                        if patch.size > 0 and np.mean(patch) > 100:
+                            temp_grid[r, c] = 1
             
-            if current_sharpness > max_sharpness:
-                max_sharpness = current_sharpness
+            cell_count = np.sum(temp_grid)
+            if cell_count == 0:
+                continue
+                
+            # Check matching score (IoU) against template library
+            # threshold=0.8 is standard for match_and_snap
+            _, score, name, _ = template_manager.match_and_snap(temp_grid, threshold=0.8)
+            
+            # Distance from initial centroid (Centroid Bias)
+            dist = (dx**2 + dy**2)**0.5
+            
+            # PRIORITY LOGIC:
+            # 1. Higher matching score
+            # 2. Tie-break with smaller distance from centroid
+            if score > best_score:
+                best_score = score
+                best_dist = dist
                 best_cx, best_cy = cx, cy
+            elif abs(score - best_score) < 0.01: # Tie-break
+                if dist < best_dist:
+                    best_dist = dist
+                    best_cx, best_cy = cx, cy
                 
     return best_cx, best_cy
 
@@ -343,23 +367,23 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     
     for r in range(5):
         for c in range(5):
-            # Sample at (r-2, c-2) relative to center
-            px = int(cx + (c - 2) * cw)
-            py = int(cy + (r - 2) * ch)
+            # Sample at (r-2, c-2) relative to center using float math
+            px = int(cx + (c - 2) * float(cw))
+            py = int(cy + (r - 2) * float(ch))
             
             # Bound check
             if 0 <= px < sw and 0 <= py < sh:
                 # Continuous Sampling: Patch touches neighbors (Zero Spacing)
-                margin_x, margin_y = cw // 2, ch // 2
-                patch = mask[max(0, py-margin_y):min(sh, py+margin_y+1), 
-                             max(0, px-margin_x):min(sw, px+margin_x+1)]
+                margin_x, margin_y = int(cw // 2), int(ch // 2)
+                patch = mask[max(0, int(py-margin_y)):min(sh, int(py+margin_y+1)), 
+                             max(0, int(px-margin_x)):min(sw, int(px+margin_x+1))]
                 
                 if patch.size > 0 and np.mean(patch) > 100:
                     grid_5x5[r, c] = 1
                     
     # Diagnostic: Print average HSV of center cell if we found "too many" or "no" blocks
     if config.DEBUG:
-        center_patch = hsv[max(0, cy-5):min(sh, cy+5), max(0, cx-5):min(sw, cx+5)]
+        center_patch = hsv[max(0, int(cy-5)):min(sh, int(cy+5)), max(0, int(cx-5)):min(sw, int(cx+5))]
         avg_hsv = np.mean(center_patch, axis=(0, 1)).astype(int)
         # If the grid is totally full (25) or empty (0), log the center color
         block_count = np.sum(grid_5x5)
@@ -457,20 +481,20 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
     
     # Draw grid cells
     for row in range(config.GRID_ROWS + 1):
-        y = y1 + row * config.CELL_HEIGHT
+        y = int(y1 + row * config.CELL_HEIGHT)
         cv2.line(vis, (x1, y), (x2, y), (0, 255, 0), 1)
     
     for col in range(config.GRID_COLS + 1):
-        x = x1 + col * config.CELL_WIDTH
+        x = int(x1 + col * config.CELL_WIDTH)
         cv2.line(vis, (x, y1), (x, y2), (0, 255, 0), 1)
     
-    # Mark filled cells
+    # Mark filled cells (Red Dots)
     for row in range(config.GRID_ROWS):
         for col in range(config.GRID_COLS):
-            if board.grid[row, col] == 1:
-                x = x1 + col * config.CELL_WIDTH + config.CELL_WIDTH // 2
-                y = y1 + row * config.CELL_HEIGHT + config.CELL_HEIGHT // 2
-                cv2.circle(vis, (x, y), 5, (0, 0, 255), -1)
+            cx = int(x1 + col * config.CELL_WIDTH + config.CELL_WIDTH / 2.0)
+            cy = int(y1 + row * config.CELL_HEIGHT + config.CELL_HEIGHT / 2.0)
+            color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
+            cv2.circle(vis, (cx, cy), 3, color, -1)
     
     # Draw piece slots and their internal relative grids
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
@@ -492,31 +516,21 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             cx_rel, cy_rel = find_best_alignment(mask, centroid[0], centroid[1], cw, ch)
             # Draw the refined centroid dot (Target)
             cv2.circle(vis, (slot.x + int(cx_rel), slot.y + int(cy_rel)), 4, (255, 100, 0), -1)
-            # Draw the original centroid as a smaller dot for comparison
-            cv2.circle(vis, (slot.x + int(centroid[0]), slot.y + int(centroid[1])), 2, (0, 255, 255), -1)
-        
-        # Draw the 5x5 fixed sampling grid for verification
+            
+        # Draw the 5x5 digital grid for verification
         for r in range(5):
             for c in range(5):
                 px = int(slot.x + cx_rel + (c - 2) * cw)
                 py = int(slot.y + cy_rel + (r - 2) * ch)
                 
-                # Highlight the calculated center of this cell
-                cv2.circle(vis, (px, py), 2, (70, 70, 70), -1)
-
-                # Draw sampling boxes (Zero Spacing continuous grid)
-                box_w, box_h = cw // 2, ch // 2
-                cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (80, 80, 80), 1)
-                
                 # Check if this cell is filled in the detect grid
                 # Use EXACT same logic as get_piece_grid for visual sync
-                patch_x, patch_y = cx_rel + (c-2)*cw, cy_rel + (r-2)*ch
                 margin_x, margin_y = cw // 2, ch // 2
-                patch = mask[max(0, int(patch_y-margin_y)):min(sh, int(patch_y+margin_y+1)), 
-                             max(0, int(patch_x-margin_x)):min(sw, int(patch_x+margin_x+1))]
+                patch = mask[max(0, int(py - slot.y - margin_y)):min(sh, int(py - slot.y + margin_y + 1)), 
+                             max(0, int(px - slot.x - margin_x)):min(sw, int(px - slot.x + margin_x + 1))]
                              
                 if patch.size > 0 and np.mean(patch) > 100:
-                    cv2.rectangle(vis, (px-box_w, py-box_h), (px+box_w, py+box_h), (0, 255, 0), 1)
+                    cv2.rectangle(vis, (px-10, py-10), (px+10, py+10), (0, 255, 0), 1)
                     cv2.circle(vis, (px, py), 3, (0, 0, 255), -1)
 
     return vis
@@ -611,22 +625,45 @@ def draw_pause_status(vis: np.ndarray, is_paused: bool):
         cv2.putText(vis, text, (tx, ty), font, scale, (0, 190, 255), thickness)
 
 
-def visualize_drag(frame: np.ndarray, move: Move, start_pos: Tuple[int, int], click_pos: Tuple[int, int], expected_pos: Tuple[int, int]) -> np.ndarray:
+def visualize_drag(frame: np.ndarray, piece: Piece, move: Move, start_xy: Tuple[int, int], click_xy: Tuple[int, int], end_xy: Tuple[int, int]) -> np.ndarray:
     """
     Visualize the drag move with:
-    - Red Cross: Actual cursor destination (click_pos, with offset)
-    - Yellow Cross: Intended piece/board center (expected_pos)
+    - Piece Blueprint: Transparent overlay of the piece at its target position.
+    - Cell Highlights: Circles on the exact cells being filled.
+    - Red Cross: Actual cursor destination (click_xy, where the mouse clicks).
+    - Yellow Cross: Intended piece anchor center (end_xy).
     """
     vis = frame.copy()
+    x1, y1 = config.GRID_TOP_LEFT
     
-    # 1. ACTUAL CURSOR DESTINATION (RED CROSS)
-    cv2.drawMarker(vis, click_pos, (0, 0, 255), cv2.MARKER_CROSS, 30, 3)
+    # 1. DRAW PIECE BLUEPRINT & CELL HIGHLIGHTS
+    # We draw where the bot thinks the pieces will land
+    for dr, dc in piece.cells:
+        r, c = move.row + dr, move.col + dc
+        if 0 <= r < 8 and 0 <= c < 8:
+            # Calculate screen center of this specific cell
+            cx = int(x1 + c * config.CELL_WIDTH + config.CELL_WIDTH / 2.0)
+            cy = int(y1 + r * config.CELL_HEIGHT + config.CELL_HEIGHT / 2.0)
+            
+            # Draw a block blueprint (Semi-transparent orange)
+            overlay = vis.copy()
+            bw, bh = int(config.CELL_WIDTH * 0.8), int(config.CELL_HEIGHT * 0.8)
+            cv2.rectangle(overlay, (cx - bw//2, cy - bh//2), (cx + bw//2, cy + bh//2), (0, 165, 255), -1)
+            cv2.addWeighted(overlay, 0.5, vis, 0.5, 0, vis)
+            
+            # Precise center dot for this cell
+            cv2.circle(vis, (cx, cy), 4, (0, 255, 255), -1)
+
+    # 2. DRAW DRAG PATH
+    cv2.line(vis, start_xy, click_xy, (200, 200, 200), 1, cv2.LINE_AA)
     
-    # 2. EXPECTED BOARD DESTINATION (YELLOW CROSS)
-    cv2.drawMarker(vis, expected_pos, (0, 255, 255), cv2.MARKER_CROSS, 20, 2)
+    # 3. ACTUAL CURSOR DESTINATION (RED CROSS - where it drags to)
+    cv2.drawMarker(vis, click_xy, (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
+    cv2.putText(vis, "CURSOR", (click_xy[0] + 20, click_xy[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
     
-    # Optional: Draw a line between them to show the offset distance
-    cv2.line(vis, expected_pos, click_pos, (200, 200, 200), 1)
+    # 4. EXPECTED BOARD ANCHOR (YELLOW CROSS - where the piece anchor should be)
+    cv2.drawMarker(vis, end_xy, (0, 255, 255), cv2.MARKER_TILTED_CROSS, 25, 2)
+    cv2.putText(vis, "PIECE CENTER", (end_xy[0] + 15, end_xy[1] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
     
     return vis
     

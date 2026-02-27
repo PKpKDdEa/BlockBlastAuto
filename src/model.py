@@ -16,7 +16,8 @@ class Piece:
     height: int
     raw_mask: Optional[np.ndarray] = None # Original 5x5 detection for learning
     is_new: bool = False # Whether this piece is a new unidentified pattern
-    
+    bitmask: int = 0  # Bitboard representation (64-bit)
+
     @classmethod
     def from_mask(cls, piece_id: int, mask: np.ndarray, is_new: bool = False) -> 'Piece':
         """
@@ -33,13 +34,17 @@ class Piece:
         min_c, max_c = np.min(cols), np.max(cols)
         
         cells = []
+        bitmask = 0
         for r, c in zip(rows, cols):
-            cells.append((int(r - min_r), int(c - min_c)))
+            rel_r, rel_c = int(r - min_r), int(c - min_c)
+            cells.append((rel_r, rel_c))
+            bitmask |= (1 << (rel_r * 8 + rel_c))
             
         height = int(max_r - min_r + 1)
         width = int(max_c - min_c + 1)
         
-        return cls(id=piece_id, cells=cells, width=width, height=height, raw_mask=raw_mask, is_new=is_new)
+        return cls(id=piece_id, cells=cells, width=width, height=height, 
+                   raw_mask=raw_mask, is_new=is_new, bitmask=bitmask)
     
     def __eq__(self, other):
         """Custom equality check to handle numpy arrays in raw_mask."""
@@ -48,6 +53,8 @@ class Piece:
         if self.id != other.id or self.width != other.width or self.height != other.height:
             return False
         if self.cells != other.cells:
+            return False
+        if self.bitmask != other.bitmask:
             return False
         if self.raw_mask is not None and other.raw_mask is not None:
             return np.array_equal(self.raw_mask, other.raw_mask)
@@ -92,6 +99,7 @@ class Board:
         self.rows = rows
         self.cols = cols
         self.grid = np.zeros((rows, cols), dtype=np.int8)
+        self.bitboard = 0  # 64-bit integer
         self.combo_streak = 0  # Number of consecutive placements that cleared lines
         self.total_score = 0
     
@@ -100,12 +108,20 @@ class Board:
         """Create board from existing array."""
         board = cls(rows=grid.shape[0], cols=grid.shape[1])
         board.grid = grid.copy()
+        
+        # Sync bitboard
+        board.bitboard = 0
+        rows, cols = np.where(grid == 1)
+        for r, c in zip(rows, cols):
+            board.bitboard |= (1 << (r * 8 + c))
+            
         return board
     
     def copy(self) -> 'Board':
         """Create a fast copy of this board."""
         new_board = Board(self.rows, self.cols)
         new_board.grid[:] = self.grid
+        new_board.bitboard = self.bitboard
         new_board.combo_streak = self.combo_streak
         new_board.total_score = self.total_score
         return new_board
@@ -122,95 +138,75 @@ class Board:
 def is_legal(board: Board, piece: Piece, row: int, col: int) -> bool:
     """
     Check if placing a piece at position is legal.
-    
-    Args:
-        board: Current board state
-        piece: Piece to place
-        row: Target row (anchor position)
-        col: Target col (anchor position)
-    
-    Returns:
-        True if move is legal, False otherwise
     """
-    for dr, dc in piece.cells:
-        r = row + dr
-        c = col + dc
-        
-        # Check bounds
-        if r < 0 or r >= board.rows or c < 0 or c >= board.cols:
-            return False
-        
-        # Check if cell is already occupied
-        if board.grid[r, c] != 0:
-            return False
+    # Quick bounds check
+    if row < 0 or row + piece.height > board.rows or col < 0 or col + piece.width > board.cols:
+        return False
     
+    # Bitmask-based collision check
+    piece_mask = piece.bitmask << (row * 8 + col)
+    if (board.bitboard & piece_mask) != 0:
+        return False
+        
     return True
 
 
 def apply_move(board: Board, piece: Piece, row: int, col: int) -> Tuple[Board, int, int]:
     """
     Apply a move and return new board state.
-    
-    Args:
-        board: Current board state
-        piece: Piece to place
-        row: Target row
-        col: Target col
-    
-    Returns:
-        Tuple of (new_board, lines_cleared, score_gain)
     """
-    # Create new board
     new_board = board.copy()
     
-    # Place piece
+    # Place piece on bitboard
+    piece_mask = piece.bitmask << (row * 8 + col)
+    new_board.bitboard |= piece_mask
+    
+    # Sync numpy grid
     for dr, dc in piece.cells:
-        r = row + dr
-        c = col + dc
-        new_board.grid[r, c] = 1
+        new_board.grid[row + dr, col + dc] = 1
     
-    # Check for completed lines
+    # Check for completed lines using bitmasks
     lines_cleared = 0
-    rows_to_clear = []
-    cols_to_clear = []
     
-    # Check rows
-    for r in range(new_board.rows):
-        if np.all(new_board.grid[r, :] == 1):
+    # Pre-calculated masks for whole rows/cols
+    # Row masks: 0xFF, 0xFF00, ...
+    # Col masks: 0x0101010101010101, 0x0202020202020202, ...
+    
+    rows_to_clear = []
+    for r in range(8):
+        row_mask = 0xFF << (r * 8)
+        if (new_board.bitboard & row_mask) == row_mask:
             rows_to_clear.append(r)
             lines_cleared += 1
-    
-    # Check columns
-    for c in range(new_board.cols):
-        if np.all(new_board.grid[:, c] == 1):
+            
+    cols_to_clear = []
+    for c in range(8):
+        col_mask = 0x0101010101010101 << c
+        if (new_board.bitboard & col_mask) == col_mask:
             cols_to_clear.append(c)
             lines_cleared += 1
-    
-    # Clear lines
+            
+    # Clear lines on bitboard
     for r in rows_to_clear:
+        row_mask = 0xFF << (r * 8)
+        new_board.bitboard &= ~row_mask
         new_board.grid[r, :] = 0
+        
     for c in cols_to_clear:
+        col_mask = 0x0101010101010101 << c
+        new_board.bitboard &= ~col_mask
         new_board.grid[:, c] = 0
     
-    # Calculate score based on official-like rules
-    # 1. Base points for pieces placed
+    # Score calculation
     base_points = len(piece.cells)
-    
-    # 2. Line clear points (exponential for combos)
     clear_points = 0
     if lines_cleared > 0:
-        # Combo: multiple lines in one move
-        # e.g., 1 line = 10, 2 lines = 30, 3 lines = 60, etc.
         clear_points = (lines_cleared * (lines_cleared + 1) // 2) * 10
-        
-        # Streak: consecutive moves that clear lines
-        # This usually multiples the clear_points
         new_board.combo_streak += 1
-        streak_multiplier = max(1, new_board.combo_streak)
-        clear_points *= streak_multiplier
+        clear_points *= max(1, new_board.combo_streak)
     else:
         new_board.combo_streak = 0
-    
+        
     score_gain = base_points + clear_points
     new_board.total_score += score_gain
     

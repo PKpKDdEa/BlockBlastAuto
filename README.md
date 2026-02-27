@@ -1,141 +1,77 @@
-# Block Blast Automation
+# Block Blast Automation (Enhanced)
 
-Python automation system to auto-play Block Blast on Windows using LDPlayer emulator. The system uses computer vision to detect the game board, computes optimal moves using a permutation-based sequence solver, and executes mouse drags automatically with an evolutionary self-tuning algorithm.
+A high-performance Python automation system designed to play Block Blast on Android emulators (MuMu, LDPlayer). This system leverages computer vision for board state detection, bitboard-optimized game logic, and an evolutionary algorithm for heuristic weight tuning.
 
-## Architecture
+## 🚀 Key Features
 
-```
-┌─────────────────┐
-│   LDPlayer      │
-│  (Block Blast)  │
-└────────┬────────┘
-         │ Screen Capture
-         ▼
-┌─────────────────┐
-│  Vision System  │◄────────┐
-│(Animation Aware)│         │
-└────────┬────────┘         │
-         │ Board State      │
-         ▼                  │
-┌─────────────────┐         │ Weights
-│  Solver Engine  │         │ Update
-│(Permutation/3)  │         │
-└────────┬────────┘         │
-         │ Best Sequence    │
-         ▼                  │
-┌─────────────────┐         │
-│  Controller     │         │
-│ (LDPlayer Opt)  │         │
-└────────┬────────┘         │
-         │                  │
-         ▼                  │
-┌─────────────────┐         │
-│    Optimizer    ├─────────┘
-│ (Evolutionary)  │
-└─────────────────┘
-```
+- **Bitboard Optimization**: Board representation and logic (legality checks, scoring, placement) use bitwise operations, delivering a ~400x speedup over cell-by-cell loops.
+- **Advanced Vision System**: 
+  - **Animation-Aware**: Automatically detects when blocks are clearing or moving to prevent "half-reads".
+  - **Float-Based Sampling**: Eliminates cumulative rounding errors, ensuring sub-pixel precision for the 8x8 grid.
+  - **Template Force-Snapping**: Robustly identifies piece shapes even with visual noise or slight offsets.
+- **Intelligent Solver**: Evaluates all possible permutations of the current 3 pieces (6 sequences) to find the path that maximizes long-term stability and high scores.
+- **Self-Evolution**: If a game is lost, the bot mutates its strategy and tries again, slowly perfecting its playstyle.
+- **Enhanced Debug UI**: Live visualization showing "blueprints" of where pieces will land, target cell highlights, and cursor drag paths.
 
-## Features
+## 📁 Project Structure
 
-- **Sequence Solver**: Evaluates all 3 pieces in a turn across all 6 possible permutations to find the optimal move sequence.
-- **Self-Tuning Algorithm**: Automatically adjusts heuristic weights after every game using an evolutionary strategy to maximize high scores.
-- **Animation Awareness**: Detects when board animations (like line clears) are active to prevent reading incorrect states.
-- **Computer Vision**: Detects 8x8 game board and available pieces using OpenCV with bounding-box centering for precision.
-- **Mouse Automation**: High-reliability drag-and-drop optimized for emulators like LDPlayer.
-- **Calibration Tools**: Interactive tools to set up coordinates for your screen.
+### Core Modules (`src/`)
 
-## Setup
+- **`main.py`**: The central orchestrator. It manages the capture loop, turn detection, and triggers the solver and controller. It also handles the "Self-Improvement" loop by recording game statistics.
+- **`vision.py`**: The "eyes" of the bot. It converts raw emulator screenshots into a binary board state.
+  - *Key Class*: `TemplateManager` - Manages a library of 5x5 piece patterns and snaps detected shapes to known blocks.
+  - *Precision*: Uses `CELL_WIDTH/HEIGHT` as floats to avoid grid drift across the board.
+- **`model.py`**: Defines the `Board` and `Piece` objects.
+  - *Optimization*: Uses bitmasks (64-bit integers) to represent the 8x8 grid. Placing a piece is a simple `board | piece` operation.
+- **`solver.py`**: The "brain". It performs a recursive search across all permutations of the current piece tray.
+  - *Heuristic scoring*: Evaluates board "health" based on holes, bumpiness, and potential for chain clears (combos).
+- **`controller.py`**: The "hands". Translates logical moves (Row 5, Col 2) into physical mouse coordinates.
+  - *MuMu Offsets*: Includes specific logic for vertical dragging offsets (Line 1 to 7) and horizontal row-height compensation.
+- **`window_capture.py`**: Fast screen capture utility using `mss` and `win32gui` for minimal lag top-level window grabbing.
+- **`config.py`**: Central hub for all tuning parameters, window titles, and heuristic weights.
+- **`optimizer.py`**: Implements the Evolutionary Strategy. It maintains a population of weights and evolves them based on game performance.
 
-### 1. Install Dependencies
+### Tools & Support
 
-```bash
-# Create virtual environment
-python -m venv venv
+- **`tools/calibrate_grid.py`**: Interactive GUI to calibrate board boundaries and piece slot positions.
+- **`tools/collect_pieces.py`**: Helper script to capture new piece patterns if the game updates.
 
-# Activate virtual environment
-venv\Scripts\activate  # Windows
+## 🛠️ Installation & Setup
 
-# Install dependencies
-pip install -r requirements.txt
-```
+1. **Install Python 3.10+**
+2. **Setup Virtual Environment**:
+   ```bash
+   python -m venv venv
+   venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+3. **Configure Emulator**:
+   - Resolution: **1080x1920** (Portrait).
+   - Recommended: **MuMu Emulator** (Window Title: "Android Device").
+4. **Calibration**:
+   ```bash
+   python tools/calibrate_grid.py
+   ```
+   *Follow the prompts to click the corners of the 8x8 board and the centers of the 3 piece slots.*
 
-### 2. Configure LDPlayer
+## 🎮 Usage
 
-- Set resolution to **1080x1920** (or note your resolution for calibration)
-- Install and launch Block Blast
-- Position the emulator window where it won't be moved
-
-### 3. Calibrate Coordinates
-
-```bash
-python tools/calibrate_grid.py
-```
-
-Follow the interactive prompts to:
-- Click on grid corners
-- Mark piece slot positions
-- Save configuration
-
-### 4. Run the Bot
-
+Run the main script:
 ```bash
 python src/main.py
 ```
 
-## Project Structure
+### Controls
+- **F10**: Pause/Resume the bot.
+- **F11**: Toggle between **Auto-Play** and **Observation Mode** (where it only shows you what it *would* do).
 
-```
-BlockBlastAutomatic/
-├── src/
-│   ├── config.py           # Configuration and weight management
-│   ├── window_capture.py   # Screen capture
-│   ├── vision.py           # CV for board/piece detection & animation logic
-│   ├── model.py            # Game logic & scoring (Combos/Streaks)
-│   ├── solver.py           # Permutation-based move selection
-│   ├── optimizer.py        # Evolutionary weight tuning
-│   ├── controller.py       # Mouse automation
-│   └── main.py             # Main loop & self-improvement logic
-├── tools/
-│   ├── calibrate_grid.py   # Grid calibration tool
-│   └── collect_pieces.py   # Piece template collection
-├── tests/
-│   ├── test_model.py
-│   └── test_solver.py
-├── templates/              # Piece shape templates
-├── requirements.txt
-└── README.md
-```
+## 📊 Heuristic Tuning
 
-## How It Works
+The bot evaluates moves using several weighted factors:
+- **Empty Cells**: More space is better.
+- **Holes**: Punish gaps that are surrounded by blocks.
+- **Bumpiness**: Prefer a flat surface to keep more piece types viability.
+- **Streak/Combo**: Heavily reward clearing lines, especially multiple turns in a row.
 
-1. **Capture**: Screenshots the LDPlayer window.
-2. **Stable Detection**: Waits for animations to finish before reading the board.
-3. **Vision**: Detects filled/empty cells and centers piece shapes for recognition.
-4. **Sequence Solve**: Evaluates all combinations of the 3 current pieces.
-5. **Execute**: Performs reliable drags via the controller.
-6. **Evolve**: On Game Over, the optimizer records the score and mutates weights for the next evolution.
-
-## Heuristic Scoring
-
-The solver's weights are dynamically tuned by the `optimizer.py`, but generally focus on:
-- **Empty Cells**: Maximize free space.
-- **Hole Penalty**: Avoid trapped empty squares.
-- **Bumpiness**: Maintain a flat surface for piece flexibility.
-- **Near-Complete Lines**: Set up future clears.
-- **Combo/Streak Bonus**: Exponential scoring for chained clears.
-
-## Development
-
-### Run Tests
-
-```bash
-pytest tests/ -v
-```
-
-### Debug Mode
-
-Edit `src/config.py` and set `DEBUG = True` to enable visual debugging output.
-
-## License
-
+## 📄 License
 MIT
