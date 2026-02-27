@@ -13,6 +13,7 @@ import keyboard
 
 
 from optimizer import WeightOptimizer
+from oracle_feedback import OracleFeedback
 
 def main():
     """Main bot loop."""
@@ -24,6 +25,7 @@ def main():
     # Initialize components
     config.load()
     optimizer = WeightOptimizer()
+    oracle = OracleFeedback()
     current_weights = optimizer.get_current_weights()
     print("Loaded heuristic weights:")
     import json
@@ -63,8 +65,28 @@ def main():
         status = "AUTO-PLAY" if state["auto_play"] else "OBSERVATION-ONLY"
         print(f"\n[MODE: {status}] - Bot will {'now drag pieces' if state['auto_play'] else 'only observe'}.")
     
+    def on_reset_training():
+        print("\n[RESET] Triggering Full Training Reset (F12)...")
+        optimizer.reset_training_data()
+        nonlocal current_weights
+        current_weights = optimizer.get_current_weights()
+        print("Weights reset to defaults.")
+
+    def on_force_oracle():
+        print("\n[ORACLE] Forcing comparison with expert...")
+        # (This will trigger on next move)
+        state["force_oracle"] = True
+
+    def on_toggle_oracle():
+        oracle.oracle_enabled = not oracle.oracle_enabled
+        status = "ENABLED" if oracle.oracle_enabled else "DISABLED"
+        print(f"\n[ORACLE] Mode: {status}")
+
     keyboard.add_hotkey(config.HOTKEY_PAUSE, on_toggle_pause)
     keyboard.add_hotkey(config.HOTKEY_AUTO_TOGGLE, on_toggle_auto)
+    keyboard.add_hotkey("f12", on_reset_training)
+    keyboard.add_hotkey("f13", on_force_oracle)
+    keyboard.add_hotkey("f14", on_toggle_oracle)
     
     try:
         while True:
@@ -129,6 +151,13 @@ def main():
             # 3. Solve & Execute (Auto-Play ONLY)
             move = best_move(board, pieces)
             
+            # ORACLE FEEDBACK (v2.1)
+            if oracle.oracle_enabled or state.get("force_oracle"):
+                oracle_move = oracle.get_oracle_comparison(board, pieces)
+                my_move_dict = {"row": move.row, "col": move.col, "piece_index": move.piece_index} if move else None
+                oracle.record_state(board, pieces, my_move_dict, oracle_move, board.total_score)
+                state["force_oracle"] = False # Reset flag
+
             if move is None:
                 print("\n" + "=" * 50)
                 print("GAME OVER: No legal moves!")
