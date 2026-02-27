@@ -192,34 +192,17 @@ def read_board(frame: np.ndarray) -> Board:
 
 def classify_cell(patch: np.ndarray) -> bool:
     """
-    Classify a cell patch as filled or empty.
-    
-    Uses color-based detection. Filled cells typically have vibrant colors,
-    while empty cells are darker/grayer.
-    
-    Args:
-        patch: Small BGR image patch from cell center
-    
-    Returns:
-        True if cell is filled, False if empty
+    Classifies a board cell as filled or empty.
+    v2.7: Uses unified vibrancy mask to exclude saturated blue backgrounds.
     """
     if patch.size == 0:
         return False
     
-    # Convert to HSV for better color detection
     hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+    mask = get_piece_vibrancy_mask(hsv)
     
-    # Calculate average brightness (V channel)
-    avg_brightness = np.mean(hsv[:, :, 2])
-    
-    # Calculate saturation (S channel)
-    avg_saturation = np.mean(hsv[:, :, 1])
-    
-    # Filled cells are typically brighter and more saturated
-    # These thresholds may need tuning based on actual game appearance
-    is_filled = avg_brightness > 80 and avg_saturation > 30
-    
-    return is_filled
+    # If more than 30% of the patch is vibrant color, consider it filled
+    return np.mean(mask) > 80
 
 
 def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
@@ -228,12 +211,13 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     Handles Stage 1 (High Vibrancy) and Stage 2 (Color Selective).
     """
     # Stage 1: Absolute Vibrancy (Catches any block with high saturation)
-    # v2.6 Recovery: Using 140 as a robust MuMu baseline.
-    lower_vibrant = np.array([0, 140, 60])
+    # v2.7: Renamed to raw and tightened to 160.
+    lower_vibrant = np.array([0, 160, 80])
     upper_vibrant = np.array([180, 255, 255])
-    mask_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
+    mask_raw_vibrant = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
-    # Stage 2: Color Selective (Avoid Tray Blue)
+    # Stage 2: Color Selective (Green, Red, Yellow, Purple)
+    # Using config values for hue boundaries
     lower_r1 = np.array([0, 80, 80])
     upper_r1 = np.array([config.VISION_EXCLUDE_HUE_MIN, 255, 255])
     
@@ -243,14 +227,21 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray) -> np.ndarray:
     mask_r1 = cv2.inRange(hsv_img, lower_r1, upper_r1)
     mask_r2 = cv2.inRange(hsv_img, lower_r2, upper_r2)
     
-    # Combine masks
-    mask = cv2.bitwise_or(mask_vibrant, mask_r1)
-    mask = cv2.bitwise_or(mask, mask_r2)
+    # Stage 3: BLUE EXCLUSION (Specifically target the Tray Background)
+    # Even if it's vibrant, we REJECT it if it's in the Blue/Gray range
+    lower_blue = np.array([config.VISION_EXCLUDE_HUE_MIN, 0, 0])
+    upper_blue = np.array([config.VISION_EXCLUDE_HUE_MAX, 255, 255])
+    mask_is_blue = cv2.inRange(hsv_img, lower_blue, upper_blue)
+    
+    # Final Logic: (Red/Yellow/Green OR (Vibrant AND NOT Blue))
+    vibrant_but_not_blue = cv2.bitwise_and(mask_raw_vibrant, cv2.bitwise_not(mask_is_blue))
+    mask = cv2.bitwise_or(mask_r1, mask_r2)
+    mask = cv2.bitwise_or(mask, vibrant_but_not_blue)
     
     # Cleanup noise
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    # v2.6 Recovery: Single iteration to avoid merging into background.
+    # v2.7 Recovery: Single iteration.
     mask = cv2.dilate(mask, kernel, iterations=1)
     
     return mask
