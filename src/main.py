@@ -202,9 +202,9 @@ def main():
                 viz_dest_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH) + int(x_offset_mumu)
                 
                 if viz_dest_x > start_xy[0]: # Dragging Right
-                    viz_dest_x -= int(config.DRAG_OFFSET_X)
-                elif viz_dest_x < start_xy[0]: # Dragging Left
                     viz_dest_x += int(config.DRAG_OFFSET_X)
+                elif viz_dest_x < start_xy[0]: # Dragging Left
+                    viz_dest_x -= int(config.DRAG_OFFSET_X)
 
                 click_xy = (int(viz_dest_x), end_xy[1] + current_offset)
                 
