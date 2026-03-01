@@ -2,7 +2,7 @@
 Configuration for Block Blast automation.
 Stores all calibration values and runtime parameters.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple, List, Dict
 
 
@@ -112,12 +112,12 @@ class Config:
     
     # v4.9 Nonlinear Displacement Tables (Multipliers for Cell Size)
     # Key: Distance in cells from slot to target
-    DISPLACEMENT_X_TABLE: Dict[int, float] = {
+    DISPLACEMENT_X_TABLE: Dict[int, float] = field(default_factory=lambda: {
         1: 0.6, 2: 0.6, 3: 1.2, 4: 1.7, 5: 1.8, 6: 2.1, 7: 4.0, 8: 4.0
-    }
-    DISPLACEMENT_Y_TABLE: Dict[int, float] = {
+    })
+    DISPLACEMENT_Y_TABLE: Dict[int, float] = field(default_factory=lambda: {
         1: 1.6, 2: 1.6, 3: 2.2, 4: 2.4, 5: 3.7, 6: 3.7, 7: 3.7, 8: 3.7
-    }
+    })
     
     # Vision Throttles (Aggressive Sensitivity)
     VISION_SAT_THRESHOLD: int = 150
