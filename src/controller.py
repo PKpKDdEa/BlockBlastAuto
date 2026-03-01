@@ -100,20 +100,12 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     # Even rows (relative to lines): align center to line
     # Odd rows (relative to lines): align center to cell
     
-    ref_line = round(piece_center_row) 
-    # Bounds check ref_line (1-7)
-    ref_line = max(1, min(7, ref_line))
+    # v4.8 Linear Displacement Logic
+    # Y-Offset: Proportional gradient from bottom of board to top
+    y_progress = (7.0 - target_row) / 7.0 # Row 7=0.0, Row 0=1.0
+    y_offset = config.DRAG_OFFSET_Y_BOTTOM + y_progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM)
     
-    # MuMu Offset Table
-    # Line 1: 4.2, Line 2: 4.0, Line 3: 3.6, Line 4: 3.2, Line 5: 3.2, Line 6: 2.5, Line 7: 2.5
-    offsets = {
-        1: 4.2, 2: 4.0, 3: 3.6, 4: 3.2, 5: 3.2, 6: 2.5, 7: 2.5
-    }
-    multiplier = offsets.get(ref_line, 2.5)
-    
-    y_offset = multiplier * config.CELL_HEIGHT
-    y_offset = multiplier * config.CELL_HEIGHT
-    # x_offset = piece.height * 0.4 * config.CELL_WIDTH  <-- v4.7: Abolishing legacy MuMu shift
+    # x_offset = piece.height * 0.4 * config.CELL_WIDTH  <-- v4.7: Abolished legacy MuMu shift
     
     # Screen position of the target cell (top-left of piece anchor)
     anchor_center_x, anchor_center_y = cell_center(target_row, target_col)
@@ -141,18 +133,17 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
         # Align to cell center (already handled by anchor_center_y + anchor_dr)
         pass
 
-    # v4.7 Horizon-Based X-Pull (Pull toward board center)
-    if target_col >= 4: # Right side
-        dest_x -= int(config.DRAG_OFFSET_X)
-    elif target_col <= 3: # Left side
-        dest_x += int(config.DRAG_OFFSET_X)
+    # v4.8 Proportional X-Pull (Pull toward board center based on distance)
+    # col_dist: distance from the board's vertical center line (3.5)
+    col_dist = target_col - 3.5
+    x_pull = col_dist * config.DRAG_OFFSET_X
+    dest_x -= int(x_pull)
 
     end_pos = (dest_x, dest_y)
     
     if config.DEBUG:
-        x_pull = -config.DRAG_OFFSET_X if target_col >= 4 else config.DRAG_OFFSET_X
         print(f"Dragging piece {piece.id} to board ({target_row}, {target_col})")
-        print(f"  Line: {ref_line}, Multiplier: {multiplier}, Rows: {piece.height}")
+        print(f"  Rows: {piece.height}, Y_Progress: {y_progress:.2f}")
         print(f"  Offsets: Pull_X={int(x_pull)}, Y={int(y_offset)}")
         print(f"  Final Cursor Target: {end_pos}")
     

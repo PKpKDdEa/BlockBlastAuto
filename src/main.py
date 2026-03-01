@@ -192,28 +192,23 @@ def main():
                 anchor_center_x, anchor_center_y = config.GRID_TOP_LEFT[0] + (move.col + 0.5)*config.CELL_WIDTH, config.GRID_TOP_LEFT[1] + (move.row + 0.5)*config.CELL_HEIGHT
                 end_xy = (int(anchor_center_x), int(anchor_center_y))
                 
-                # Apply simulated Y-offset for visualization
-                y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
-                progress = max(0, min(1, (y_bottom - end_xy[1]) / (y_bottom - y_top)))
-                current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
-                # v4.7.2 Accurate 'Piece Center' (Yellow Cross) Alignment
+                # v4.8 Linear Displacement Visualization
+                y_progress = (7.0 - move.row) / 7.0
+                current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + y_progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
+                
                 anchor_dr, anchor_dc = piece.anchor_offset
                 piece_center_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH)
                 piece_center_y = end_xy[1] + int(anchor_dr * config.CELL_HEIGHT)
                 
-                # Update end_xy to be the piece center for visualize_drag (Yellow Cross)
                 end_xy_center = (int(piece_center_x), int(piece_center_y))
                 
-                # Apply pull toward board center logic
-                click_x = piece_center_x
-                if move.col >= 4: # Right side
-                    click_x -= int(config.DRAG_OFFSET_X) # Pull Left (closer to center)
-                elif move.col <= 3: # Left side
-                    click_x += int(config.DRAG_OFFSET_X) # Pull Right (closer to center)
+                # Proportional X-Pull
+                col_dist = move.col - 3.5
+                x_pull = col_dist * config.DRAG_OFFSET_X
+                click_x = piece_center_x - x_pull
 
                 click_xy = (int(click_x), int(piece_center_y + current_offset))
                 
-                # Pass the ACTUAL piece center as end_xy for the Yellow Cross
                 vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy_center)
                 cv2.imshow("Bot Vision", vis_drag)
                 cv2.waitKey(1)
