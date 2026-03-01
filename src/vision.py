@@ -271,28 +271,33 @@ def read_pieces(frame: np.ndarray) -> List[Piece]:
     
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
-        mask, is_new = detect_piece_mask(piece_region)
+        mask, is_new, t_cx, t_cy = detect_piece_mask(piece_region)
         
         if mask is not None and np.sum(mask) > 0:
+            # v3.9: Store the actual piece center in the tray
             piece = Piece.from_mask(piece_id=slot_idx, mask=mask, is_new=is_new)
+            piece.tray_cx = t_cx
+            piece.tray_cy = t_cy
             pieces.append(piece)
             if config.DEBUG:
-                print(f"Piece {slot_idx} detected: {piece.width}x{piece.height}")
+                print(f"Piece {slot_idx} detected: {piece.width}x{piece.height} at ({t_cx:.1f}, {t_cy:.1f})")
         else:
             pieces.append(None)
     
     return pieces
 
 
-def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], bool]:
+def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], bool, float, float]:
     """
     Detect the piece shape and identify if it is a new pattern.
-    Returns (final_grid, is_new)
+    Returns (final_grid, is_new, piece_cx, piece_cy)
     """
-    grid_5x5 = get_piece_grid(piece_region)
-    if grid_5x5 is None:
-        return None, False
+    grid_data = get_piece_grid(piece_region)
+    if grid_data is None:
+        return None, False, 0.0, 0.0
         
+    grid_5x5, p_cx, p_cy = grid_data
+    
     # SNAPPING: Use template manager to clean up the detection
     final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
     
@@ -301,7 +306,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
         for row in final_grid:
             print("  " + "".join(["#" if x else "." for x in row]))
             
-    return final_grid, match_info.get("is_new", False)
+    return final_grid, match_info.get("is_new", False), p_cx, p_cy
 
 
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
@@ -406,9 +411,9 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if config.DEBUG:
         block_count = np.sum(grid_5x5)
         if block_count > 0:
-            print(f"  [v3.6 Centroid] Inferred {cols}x{rows}, Blocks: {block_count}")
+            print(f"  [v3.8 Calibrated] Pitch: {d}px, Blocks: {block_count}")
             
-    return grid_5x5
+    return grid_5x5, piece_cx, piece_cy
 
 
 def load_piece_templates() -> dict:
@@ -722,18 +727,17 @@ def visualize_drag(frame: np.ndarray, piece: Piece, move: Move, start_xy: Tuple[
             cv2.circle(vis, (cx, cy), 4, (0, 255, 255), -1)
 
     # 2. DRAW DRAG PATH
+    # v3.9: Accurate visual feedback for anchoring
     cv2.line(vis, start_xy, click_xy, (200, 200, 200), 1, cv2.LINE_AA)
     
-    # 3. ACTUAL CURSOR DESTINATION (RED CROSS - where it drags to)
-    cv2.drawMarker(vis, click_xy, (0, 0, 255), cv2.MARKER_CROSS, 40, 3)
-    cv2.putText(vis, "CURSOR", (click_xy[0] + 20, click_xy[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+    # Yellow Cross: Visual piece center (anchor point)
+    cv2.drawMarker(vis, end_xy, (0, 255, 255), cv2.MARKER_TILTED_CROSS, 20, 2)
+    cv2.putText(vis, "PIECE CENTER", (end_xy[0] + 15, end_xy[1]), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
     
-    # 4. EXPECTED BOARD ANCHOR (YELLOW CROSS - where the piece anchor should be)
-    cv2.drawMarker(vis, end_xy, (0, 255, 255), cv2.MARKER_TILTED_CROSS, 25, 2)
-    cv2.putText(vis, "PIECE CENTER", (end_xy[0] + 15, end_xy[1] - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    # Red Cross: Mouse Cursor (where it clicks + offset)
+    cv2.drawMarker(vis, click_xy, (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
+    cv2.putText(vis, "CURSOR", (click_xy[0] + 20, click_xy[1]), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
     
     return vis
-    
-if __name__ == "__main__":
-    print("Testing vision module...")
-    # ... rest of test code ...

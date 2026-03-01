@@ -86,7 +86,9 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     Drag a piece from its slot to a target position on the board.
     Optimized for MuMu emulator with dynamic line-based offsets.
     """
-    start_pos = piece_slot_center(piece.id)
+    # v3.9: Use the ACTUAL detected coordinates in the tray for the starting grab
+    slot = config.PIECE_SLOTS[piece.id]
+    start_pos = (int(slot.x + piece.tray_cx), int(slot.y + piece.tray_cy))
     
     # Target line index (1 to 7)
     # Line 1 is between Row 0 and 1

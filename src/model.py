@@ -17,6 +17,10 @@ class Piece:
     raw_mask: Optional[np.ndarray] = None # Original 5x5 detection for learning
     is_new: bool = False # Whether this piece is a new unidentified pattern
     bitmask: int = 0  # Bitboard representation (64-bit)
+    
+    # v3.9: Physical coordinates in the tray for precise grabbing
+    tray_cx: float = 0.0 
+    tray_cy: float = 0.0
 
     @classmethod
     def from_mask(cls, piece_id: int, mask: np.ndarray, is_new: bool = False) -> 'Piece':

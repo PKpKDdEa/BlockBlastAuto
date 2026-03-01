@@ -178,11 +178,18 @@ def main():
             print(f"Move #{move_count + 1}: Placing {piece.width}x{piece.height} at ({move.row}, {move.col}) [Streak: {board.combo_streak}]")
             
             if config.DEBUG:
-                from controller import piece_slot_center, cell_center
                 from vision import visualize_drag
-                start_xy = piece_slot_center(move.piece_index)
-                end_xy = cell_center(move.row, move.col)
-                # Apply the same logic as controller.py for visualization
+                # v3.9: Use actual piece tray center and anchor offset for visualization
+                slot = config.PIECE_SLOTS[move.piece_index]
+                start_xy = (int(slot.x + piece.tray_cx), int(slot.y + piece.tray_cy))
+                
+                # Visual center on the board
+                ar, ac = piece.anchor_offset
+                anchor_center_x, anchor_center_y = cell_center(move.row, move.col)
+                end_xy = (anchor_center_x + int(ac * config.CELL_WIDTH), 
+                          anchor_center_y + int(ar * config.CELL_HEIGHT))
+                
+                # Apply simulated Y-offset for visualization
                 y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
                 progress = max(0, min(1, (y_bottom - end_xy[1]) / (y_bottom - y_top)))
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
