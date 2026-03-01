@@ -282,7 +282,7 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     else:
         mask_bg = cv2.inRange(hsv_img, np.array([100, 0, 0]), np.array([145, 180, 255]))
     
-    mask = cv2.bitwise_or(mask_high_sat, cv2.bitwise_or(mask_r1, mask_r2))
+    mask = cv2.bitwise_or(mask_high_sat, mask_purp)
     mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg))
     
     # v3.7: Cleanup and Thick Dilation
