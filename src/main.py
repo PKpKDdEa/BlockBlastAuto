@@ -196,7 +196,17 @@ def main():
                 y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
                 progress = max(0, min(1, (y_bottom - end_xy[1]) / (y_bottom - y_top)))
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
-                click_xy = (end_xy[0], end_xy[1] + current_offset)
+                # v4.5 Directional X-Offset for Visualization
+                anchor_dr, anchor_dc = piece.anchor_offset
+                x_offset_mumu = piece.height * 0.4 * config.CELL_WIDTH
+                viz_dest_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH) + int(x_offset_mumu)
+                
+                if viz_dest_x > start_xy[0]: # Dragging Right
+                    viz_dest_x -= int(config.DRAG_OFFSET_X)
+                elif viz_dest_x < start_xy[0]: # Dragging Left
+                    viz_dest_x += int(config.DRAG_OFFSET_X)
+
+                click_xy = (int(viz_dest_x), end_xy[1] + current_offset)
                 
                 vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy)
                 cv2.imshow("Bot Vision", vis_drag)

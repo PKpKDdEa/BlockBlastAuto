@@ -66,6 +66,7 @@ class Config:
                             elif key == "GRID_BOTTOM_RIGHT": self.GRID_BOTTOM_RIGHT = ast.literal_eval(val)
                             elif key == "TRAY_CELL_SIZE": self.TRAY_CELL_SIZE = ast.literal_eval(val)
                             elif key == "TRAY_SLOT_CENTERS": self.TRAY_SLOT_CENTERS = ast.literal_eval(val)
+                            elif key == "DRAG_OFFSET_X": self.DRAG_OFFSET_X = float(val)
                 print(f"✓ Config: Auto-loaded calibration from {calib_path}")
             except Exception as e:
                 print(f"! Config: Error loading {calib_path}: {e}")
@@ -107,6 +108,7 @@ class Config:
     # User reports offset increases as the piece moves UP the screen.
     DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
+    DRAG_OFFSET_X: float = 0.0      # Horizontal parallax correction (v4.5)
     
     # Vision Throttles (Aggressive Sensitivity)
     VISION_SAT_THRESHOLD: int = 150
