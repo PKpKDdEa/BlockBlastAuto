@@ -240,45 +240,55 @@ def classify_cell(patch: np.ndarray) -> bool:
 def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray] = None, is_board: bool = False) -> np.ndarray:
     """
     Unified vibrancy-aware mask for pieces. 
-    v4.1: Lavender Boost + Board-specific lower saturation floor (S=40).
+    v4.2: Separated Board vs Slot logic. Board uses S=30 floor and NO background subtraction.
     """
     # Stage 1: Absolute Vibrancy
-    # v4.1: Lower floor for board cells (static) to catch soft Purples/Lavenders
-    s_floor = 40 if is_board else 80
-    v_floor = 100 if is_board else 140
+    # v4.2: Extremely sensitive floor for the static board (S=30, V=80)
+    s_floor = 30 if is_board else 80
+    v_floor = 80 if is_board else 140
     
     lower_vibrant = np.array([0, s_floor, v_floor]) 
     upper_vibrant = np.array([180, 255, 255])
     mask_high_sat = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
     # Stage 2: Color Selective (Boost for difficult segments)
-    # Range: Purple/Lavender (H: 130-165)
-    lower_purp = np.array([130, 40, 100])
+    # Range: Purple/Lavender (H: 130-165, relaxed for board)
+    lower_purp = np.array([130, 30 if is_board else 40, 80 if is_board else 100])
     upper_purp = np.array([165, 255, 255])
     mask_purp = cv2.inRange(hsv_img, lower_purp, upper_purp)
     
+    # Range: Navy/Dark Blue (H: 100-130, board only boost)
+    mask_navy = np.zeros_like(mask_purp)
+    if is_board:
+        lower_navy = np.array([100, 30, 80])
+        upper_navy = np.array([140, 255, 255])
+        mask_navy = cv2.inRange(hsv_img, lower_navy, upper_navy)
+    
     # Combine Absolute + Selective
-    mask = cv2.bitwise_or(mask_high_sat, mask_purp)
+    mask = cv2.bitwise_or(mask_high_sat, cv2.bitwise_or(mask_purp, mask_navy))
     
-    # Stage 3: ADAPTIVE BACKGROUND REJECTION (Mainly for Slots/Pieces)
-    if bg_sample is not None and not is_board:
-        bg_h, bg_s, bg_v = bg_sample[0]
-        lower_bg = np.array([max(0, bg_h-10), 0, 0])
-        upper_bg = np.array([min(180, bg_h+10), min(255, bg_s+20), 255])
-        mask_bg = cv2.inRange(hsv_img, lower_bg, upper_bg)
+    # Stage 3: ADAPTIVE BACKGROUND REJECTION (SLOTS ONLY)
+    if not is_board:
+        if bg_sample is not None:
+            bg_h, bg_s, bg_v = bg_sample[0]
+            lower_bg = np.array([max(0, bg_h-10), 0, 0])
+            upper_bg = np.array([min(180, bg_h+10), min(255, bg_s+20), 255])
+            mask_bg = cv2.inRange(hsv_img, lower_bg, upper_bg)
+            
+            # Dark Blue Boost for SLOTS ONLY
+            is_blue_bg = (100 <= bg_h <= 145)
+            if is_blue_bg:
+                lower_db = np.array([bg_h-15, int(bg_s + 20), 80])
+                upper_db = np.array([bg_h+15, 255, 255])
+                mask_db_boost = cv2.inRange(hsv_img, lower_db, upper_db)
+                mask_high_sat = cv2.bitwise_or(mask_high_sat, mask_db_boost)
+                mask = cv2.bitwise_or(mask_high_sat, mask_purp)
+        else:
+            mask_bg = cv2.inRange(hsv_img, np.array([100, 0, 0]), np.array([145, 180, 255]))
         
-        # Dark Blue Boost: Saturation Delta check
-        is_blue_bg = (100 <= bg_h <= 145)
-        if is_blue_bg:
-            lower_db = np.array([bg_h-15, int(bg_s + 20), 80])
-            upper_db = np.array([bg_h+15, 255, 255])
-            mask_db_boost = cv2.inRange(hsv_img, lower_db, upper_db)
-            mask_high_sat = cv2.bitwise_or(mask_high_sat, mask_db_boost)
-    else:
-        mask_bg = cv2.inRange(hsv_img, np.array([100, 0, 0]), np.array([145, 180, 255]))
+        mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg))
     
-    mask = cv2.bitwise_or(mask_high_sat, mask_purp)
-    mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg))
+    # v3.7: Cleanup and Thick Dilation
     
     # v3.7: Cleanup and Thick Dilation
     kernel = np.ones((3, 3), np.uint8)
