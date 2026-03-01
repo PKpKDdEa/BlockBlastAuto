@@ -291,9 +291,10 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     # v3.7: Cleanup and Thick Dilation
     
     # v3.7: Cleanup and Thick Dilation
+    # v4.4: Cleanup and Tight Dilation (Reduced iterations for pieces to avoid oversized BBox)
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    mask = cv2.dilate(mask, kernel, iterations=2)
+    mask = cv2.dilate(mask, kernel, iterations=1 if not is_board else 2)
     
     return mask
 
@@ -352,10 +353,10 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if piece_region.size == 0:
         return None
     
-    # 1. Enhanced CLAHE for v3.5 (Higher clip limit for dark pieces)
+    # 1. Enhanced CLAHE for v4.4 (Reduced from 4.0 to 3.0 to avoid shadow-noise)
     lab = cv2.cvtColor(piece_region, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
     cl = clahe.apply(l)
     limg = cv2.merge((cl, a, b))
     piece_enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
@@ -391,7 +392,14 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # v3.7 Centroid Selection
     best_cnt_data = min(candidates, key=lambda x: x[1])
     main_cnt = best_cnt_data[4]
+    
+    # v4.4 Clean Trim: Ensure BBox is exactly around visible mask pixels
+    # This prevents 'Grey padding' from shifting the dots
+    M_trim = cv2.moments(main_cnt)
     bx, by, bw, bh = cv2.boundingRect(main_cnt)
+    
+    # Refine BBox by checking mask density if needed (Optional for noise)
+    # But usually boundingRect on a cleaned mask is sufficient.
     
     # Inferred dims
     d = float(config.TRAY_CELL_SIZE[0])
