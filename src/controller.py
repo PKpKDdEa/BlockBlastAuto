@@ -140,11 +140,13 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
         # Align to cell center (already handled by anchor_center_y + anchor_dr)
         pass
 
-    # v4.5 Directional X-Offset (Parallax Correction) - Fixed: Reverse Logic
-    if dest_x > start_pos[0]: # Dragging Right
-        dest_x += int(config.DRAG_OFFSET_X)
-    elif dest_x < start_pos[0]: # Dragging Left
-        dest_x -= int(config.DRAG_OFFSET_X)
+    # v4.6 Horizon-Based X-Offset (Centering Pull)
+    # Pulls the piece toward the board's vertical center line
+    board_center_x = config.GRID_TOP_LEFT[0] + (config.GRID_COLS * config.CELL_WIDTH) / 2.0
+    if dest_x > board_center_x: # Right side of board
+        dest_x -= int(config.DRAG_OFFSET_X) # Pull Left
+    elif dest_x < board_center_x: # Left side of board
+        dest_x += int(config.DRAG_OFFSET_X) # Pull Right
 
     end_pos = (dest_x, dest_y)
     

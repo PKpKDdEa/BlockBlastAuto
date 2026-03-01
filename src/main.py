@@ -201,10 +201,12 @@ def main():
                 x_offset_mumu = piece.height * 0.4 * config.CELL_WIDTH
                 viz_dest_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH) + int(x_offset_mumu)
                 
-                if viz_dest_x > start_xy[0]: # Dragging Right
-                    viz_dest_x += int(config.DRAG_OFFSET_X)
-                elif viz_dest_x < start_xy[0]: # Dragging Left
+                # v4.6 Horizon-Based X-Offset for Visualization
+                board_mid_x = config.GRID_TOP_LEFT[0] + (config.GRID_COLS * config.CELL_WIDTH) / 2.0
+                if viz_dest_x > board_mid_x: # Right side
                     viz_dest_x -= int(config.DRAG_OFFSET_X)
+                elif viz_dest_x < board_mid_x: # Left side
+                    viz_dest_x += int(config.DRAG_OFFSET_X)
 
                 click_xy = (int(viz_dest_x), end_xy[1] + current_offset)
                 
