@@ -150,9 +150,10 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     end_pos = (dest_x, dest_y)
     
     if config.DEBUG:
+        x_pull = -config.DRAG_OFFSET_X if target_col >= 4 else config.DRAG_OFFSET_X
         print(f"Dragging piece {piece.id} to board ({target_row}, {target_col})")
         print(f"  Line: {ref_line}, Multiplier: {multiplier}, Rows: {piece.height}")
-        print(f"  Offsets: X={int(x_offset)}, Y={int(y_offset)}")
+        print(f"  Offsets: Pull_X={int(x_pull)}, Y={int(y_offset)}")
         print(f"  Final Cursor Target: {end_pos}")
     
     move_mouse_and_drag(start_pos, end_pos)
