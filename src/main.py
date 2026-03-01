@@ -180,14 +180,17 @@ def main():
             if config.DEBUG:
                 from vision import visualize_drag
                 # v3.9: Use actual piece tray center and anchor offset for visualization
+                # v4.0: Accurate visual feedback for Top-Left Anchoring
                 slot = config.PIECE_SLOTS[move.piece_index]
-                start_xy = (int(slot.x + piece.tray_cx), int(slot.y + piece.tray_cy))
+                d = float(config.TRAY_CELL_SIZE[0])
+                bx, by = piece.tray_cx - piece.width*d/2, piece.tray_cy - piece.height*d/2
+                # Note: tray_cx/cy from v3.9 was BBox center, we back-calculate bx/by
+                anchor_x, anchor_y = bx + d/2, by + d/2
+                start_xy = (int(slot.x + anchor_x), int(slot.y + anchor_y))
                 
-                # Visual center on the board
-                ar, ac = piece.anchor_offset
-                anchor_center_x, anchor_center_y = cell_center(move.row, move.col)
-                end_xy = (anchor_center_x + int(ac * config.CELL_WIDTH), 
-                          anchor_center_y + int(ar * config.CELL_HEIGHT))
+                # Visual anchor on the board
+                anchor_center_x, anchor_center_y = config.GRID_TOP_LEFT[0] + (move.col + 0.5)*config.CELL_WIDTH, config.GRID_TOP_LEFT[1] + (move.row + 0.5)*config.CELL_HEIGHT
+                end_xy = (int(anchor_center_x), int(anchor_center_y))
                 
                 # Apply simulated Y-offset for visualization
                 y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]

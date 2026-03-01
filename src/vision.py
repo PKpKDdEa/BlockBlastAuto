@@ -148,12 +148,7 @@ template_manager = TemplateManager()
 def read_board(frame: np.ndarray) -> Board:
     """
     Detect board state from game screenshot.
-    
-    Args:
-        frame: BGR image of game window
-    
-    Returns:
-        Board object with detected state
+    v4.0: Improved robustness for Block Blast cells.
     """
     board = Board(config.GRID_ROWS, config.GRID_COLS)
     
@@ -162,23 +157,39 @@ def read_board(frame: np.ndarray) -> Board:
     x2, y2 = config.GRID_BOTTOM_RIGHT
     grid_region = frame[y1:y2, x1:x2]
     
+    # Pre-process board for vibrancy
+    lab = cv2.cvtColor(grid_region, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8,8))
+    cl = clahe.apply(l)
+    limg = cv2.merge((cl, a, b))
+    board_en = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+    hsv = cv2.cvtColor(board_en, cv2.COLOR_BGR2HSV)
+    
+    # Unified mask for all colorful blocks on board
+    mask = get_piece_vibrancy_mask(hsv)
+    
     # Process each cell
     for row in range(config.GRID_ROWS):
         for col in range(config.GRID_COLS):
-            # Use float-based centers to avoid cumulative rounding drift
-            cell_x = int(col * config.CELL_WIDTH + config.CELL_WIDTH / 2)
-            cell_y = int(row * config.CELL_HEIGHT + config.CELL_HEIGHT / 2)
+            # cell center in grid coordinates
+            cx = int(col * config.CELL_WIDTH + config.CELL_WIDTH / 2)
+            cy = int(row * config.CELL_HEIGHT + config.CELL_HEIGHT / 2)
             
-            # Extract small patch around center
-            patch_size = int(min(config.CELL_WIDTH, config.CELL_HEIGHT) // 3)
-            y_start = int(max(0, cell_y - patch_size // 2))
-            y_end = int(min(grid_region.shape[0], cell_y + patch_size // 2))
-            x_start = int(max(0, cell_x - patch_size // 2))
-            x_end = int(min(grid_region.shape[1], cell_x + patch_size // 2))
+            # v4.0 Multi-point "Cross" Sampling
+            # Sample center + 4 offsets to handle highlights/textures
+            offset = int(config.CELL_WIDTH * 0.2)
+            points = [(cx, cy), (cx-offset, cy), (cx+offset, cy), (cx, cy-offset), (cx, cy+offset)]
             
-            patch = grid_region[y_start:y_end, x_start:x_end]
+            filled_points = 0
+            for px, py in points:
+                if 0 <= px < mask.shape[1] and 0 <= py < mask.shape[0]:
+                    if mask[py, px] > 0:
+                        filled_points += 1
             
-            is_filled = classify_cell(patch)
+            # Majority vote (at least 2 points on to count as filled)
+            is_filled = filled_points >= 2
+            
             board.grid[row, col] = 1 if is_filled else 0
             if is_filled:
                 board.bitboard |= (1 << (row * 8 + col))
@@ -358,11 +369,6 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     main_cnt = best_cnt_data[4]
     bx, by, bw, bh = cv2.boundingRect(main_cnt)
     
-    # v3.7 Geometric Centering: Revert to BBox center for precision
-    # This avoids the "Mathematical Centroid" bias toward reflections
-    piece_cx = bx + bw / 2.0
-    piece_cy = by + bh / 2.0
-    
     # Inferred dims
     d = float(config.TRAY_CELL_SIZE[0])
     cols = int(round(bw / d))
@@ -370,26 +376,23 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     cols = max(1, min(5, cols))
     rows = max(1, min(5, rows))
     
-    # v3.8 Geometric Centering (Float Precision)
-    # This ensures the grid is perfectly centered within the colorful bracket
-    piece_cx = bx + bw / 2.0
-    piece_cy = by + bh / 2.0
+    # v4.0 Top-Left Anchoring (Most Stable)
+    # This prevents odd/even centering drift by always starting d/2 from the top-left edge
+    anchor_x = bx + d / 2.0
+    anchor_y = by + d / 2.0
     
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     start_r = (5 - rows) // 2
     start_c = (5 - cols) // 2
     
-    # v3.8 Strict d/2 Margin from colorful border
+    # v4.0 Margin logic (Stricter for low-height pieces)
     margin = d / 2.0
     
     for r_idx in range(rows):
         for c_idx in range(cols):
-            # v3.8 Float spacing prevents accumulation errors
-            rel_cx = (c_idx - (cols - 1) / 2.0) * d
-            rel_cy = (r_idx - (rows - 1) / 2.0) * d
-            
-            cx_cell = int(round(piece_cx + rel_cx))
-            cy_cell = int(round(piece_cy + rel_cy))
+            # v4.0 Precise offsets from Top-Left Anchor
+            cx_cell = int(round(anchor_x + c_idx * d))
+            cy_cell = int(round(anchor_y + r_idx * d))
             
             # Sub-grid consensus (9 dots)
             offset = int(d * 0.18)
@@ -399,7 +402,7 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 for mx in [-offset, 0, offset]:
                     px, py = cx_cell + mx, cy_cell + my
                     if 0 <= px < sw and 0 <= py < sh:
-                        # v3.8: Strict margin check for consensus dots
+                        # v4.0: Margin check relative to contour
                         dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(px), float(py)), True)
                         if mask[py, px] > 0 and dist_from_edge >= margin * 0.35:
                             points_on += 1
@@ -408,10 +411,14 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
             if points_on >= 4:
                 grid_5x5[start_r + r_idx, start_c + c_idx] = 1
                 
+    # Visual Piece Center for Piece class (Geometric Centroid for handle)
+    piece_cx = bx + bw / 2.0
+    piece_cy = by + bh / 2.0
+    
     if config.DEBUG:
         block_count = np.sum(grid_5x5)
         if block_count > 0:
-            print(f"  [v3.8 Calibrated] Pitch: {d}px, Blocks: {block_count}")
+            print(f"  [v4.0 Top-Left] Pitch: {d}px, Blocks: {block_count}")
             
     return grid_5x5, piece_cx, piece_cy
 
@@ -561,12 +568,13 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         main_cnt = best_cnt_data[4]
         bx, by, bw, bh = cv2.boundingRect(main_cnt)
         
-        # v3.8 Geometric Centering (Float Precision)
-        piece_cx = bx + bw / 2.0
-        piece_cy = by + bh / 2.0
+        # v4.0 Top-Left Anchoring (Most Stable)
+        # This prevents odd/even centering drift by always starting d/2 from the top-left edge
+        d = float(config.TRAY_CELL_SIZE[0])
+        anchor_x = bx + d / 2.0
+        anchor_y = by + d / 2.0
         
         # Inferred dims (Use Calibrated Pitch)
-        d = float(config.TRAY_CELL_SIZE[0])
         cols = int(round(bw / d))
         rows = int(round(bh / d))
         cols = max(1, min(5, cols))
@@ -579,11 +587,9 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         # Draw the inferred grid samples
         for r_idx in range(rows):
             for c_idx in range(cols):
-                rel_cx = (c_idx - (cols - 1) / 2.0) * d
-                rel_cy = (r_idx - (rows - 1) / 2.0) * d
-                
-                cx_cell = int(round(piece_cx + rel_cx))
-                cy_cell = int(round(piece_cy + rel_cy))
+                # v4.0 Precise offsets from Top-Left Anchor
+                cx_cell = int(round(anchor_x + c_idx * d))
+                cy_cell = int(round(anchor_y + r_idx * d))
                 offset = int(d * 0.18)
                 
                 points_on = 0
@@ -591,7 +597,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                     for mx in [-offset, 0, offset]:
                         px, py = slot.x + cx_cell + mx, slot.y + cy_cell + my
                         if 0 <= cx_cell + mx < piece_region.shape[1] and 0 <= cy_cell + my < piece_region.shape[0]:
-                            # v3.8 strict d/2 margin test
+                            # v4.0 strict margin test
                             dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(cx_cell+mx), float(cy_cell+my)), True)
                             is_on = mask[cy_cell + my, cx_cell + mx] > 0 and dist_from_edge >= margin * 0.35
                             
