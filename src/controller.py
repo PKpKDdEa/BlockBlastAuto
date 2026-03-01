@@ -100,57 +100,51 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     # Even rows (relative to lines): align center to line
     # Odd rows (relative to lines): align center to cell
     
-    # v4.8 Linear Displacement Logic
-    # Y-Offset: Proportional gradient from bottom of board to top
-    y_progress = (7.0 - target_row) / 7.0 # Row 7=0.0, Row 0=1.0
-    y_offset = config.DRAG_OFFSET_Y_BOTTOM + y_progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM)
+    # v4.9 Non-Linear Displacement Logic (Piecewise)
+    start_x, start_y = piece_slot_center(piece.id)
     
-    # x_offset = piece.height * 0.4 * config.CELL_WIDTH  <-- v4.7: Abolished legacy MuMu shift
-    
-    # Screen position of the target cell (top-left of piece anchor)
+    # Target screen positions for the pieces internal center
     anchor_center_x, anchor_center_y = cell_center(target_row, target_col)
-    
-    # Adjust for piece size (anchor is at 0,0 in Piece.cells)
-    # Visual center of the piece in grid units
     anchor_dr, anchor_dc = piece.anchor_offset
+    piece_target_x = anchor_center_x + int(anchor_dc * config.CELL_WIDTH)
+    piece_target_y = anchor_center_y + int(anchor_dr * config.CELL_HEIGHT)
     
-    dest_x = anchor_center_x + int(anchor_dc * config.CELL_WIDTH)
-    dest_y = anchor_center_y + int(anchor_dr * config.CELL_HEIGHT) + int(y_offset)
+    # Distance in cells from starting slot center
+    dx_cells = round(abs(piece_target_x - start_x) / config.CELL_WIDTH)
+    dy_cells = round(abs(start_y - piece_target_y) / config.CELL_HEIGHT)
     
-    # v4.8.1 Fix: Restore ref_line for even-height alignment
-    # Visual center of the piece in grid units
+    # Lookup multipliers (capped at 8)
+    mult_x = config.DISPLACEMENT_X_TABLE.get(min(8, dx_cells), 0.6)
+    mult_y = config.DISPLACEMENT_Y_TABLE.get(min(8, dy_cells), 1.6)
+    
+    y_offset = int(mult_y * config.CELL_HEIGHT)
+    x_pull = int(mult_x * config.CELL_WIDTH)
+    
+    dest_x = piece_target_x
+    dest_y = piece_target_y + y_offset
+    
+    # v4.8.1 Piece Center / Line Alignment
     piece_center_row = target_row + anchor_dr + piece.height / 2.0
     ref_line = round(piece_center_row)
     ref_line = max(1, min(7, ref_line))
     
-    # Alignment Rule: 
-    # "place the object block with even number row's center on the line 
-    #  and odd number row's center on the target cell"
-    # Even number of rows -> center is on a line
-    # Odd number of rows -> center is in a cell center
-    
     if piece.height % 2 == 0:
-        # Align to nearest line
         line_y = config.GRID_TOP_LEFT[1] + ref_line * config.CELL_HEIGHT
-        # Note: cell_center already adds 0.5 * cell_h, so anchor_center_y is at row + 0.5
-        # We need to shift to the line
-        dest_y = line_y + int(y_offset)
-    else:
-        # Align to cell center (already handled by anchor_center_y + anchor_dr)
-        pass
+        dest_y = line_y + y_offset
 
-    # v4.8 Proportional X-Pull (Pull toward board center based on distance)
-    # col_dist: distance from the board's vertical center line (3.5)
-    col_dist = target_col - 3.5
-    x_pull = col_dist * config.DRAG_OFFSET_X
-    dest_x -= int(x_pull)
+    # Apply Directional X-Pull
+    if piece_target_x > start_x: # Moving Right
+        dest_x -= x_pull
+    elif piece_target_x < start_x: # Moving Left
+        dest_x += x_pull
 
     end_pos = (dest_x, dest_y)
     
     if config.DEBUG:
         print(f"Dragging piece {piece.id} to board ({target_row}, {target_col})")
-        print(f"  Rows: {piece.height}, Y_Progress: {y_progress:.2f}")
-        print(f"  Offsets: Pull_X={int(x_pull)}, Y={int(y_offset)}")
+        print(f"  Distance Cells: X={dx_cells}, Y={dy_cells}")
+        print(f"  Multipliers: X={mult_x:.2f}, Y={mult_y:.2f}")
+        print(f"  Offsets: Pull_X={x_pull}, Y={y_offset}")
         print(f"  Final Cursor Target: {end_pos}")
     
     move_mouse_and_drag(start_pos, end_pos)
