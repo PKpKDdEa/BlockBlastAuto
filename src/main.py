@@ -196,18 +196,25 @@ def main():
                 y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
                 progress = max(0, min(1, (y_bottom - end_xy[1]) / (y_bottom - y_top)))
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
-                # v4.7 Horizon-Based X-Pull for Visualization
+                # v4.7.2 Accurate 'Piece Center' (Yellow Cross) Alignment
                 anchor_dr, anchor_dc = piece.anchor_offset
-                viz_dest_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH)
+                piece_center_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH)
+                piece_center_y = end_xy[1] + int(anchor_dr * config.CELL_HEIGHT)
                 
+                # Update end_xy to be the piece center for visualize_drag (Yellow Cross)
+                end_xy_center = (int(piece_center_x), int(piece_center_y))
+                
+                # Apply pull toward board center logic
+                click_x = piece_center_x
                 if move.col >= 4: # Right side
-                    viz_dest_x -= int(config.DRAG_OFFSET_X)
+                    click_x -= int(config.DRAG_OFFSET_X) # Pull Left (closer to center)
                 elif move.col <= 3: # Left side
-                    viz_dest_x += int(config.DRAG_OFFSET_X)
+                    click_x += int(config.DRAG_OFFSET_X) # Pull Right (closer to center)
 
-                click_xy = (int(viz_dest_x), end_xy[1] + current_offset)
+                click_xy = (int(click_x), int(piece_center_y + current_offset))
                 
-                vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy)
+                # Pass the ACTUAL piece center as end_xy for the Yellow Cross
+                vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy_center)
                 cv2.imshow("Bot Vision", vis_drag)
                 cv2.waitKey(1)
                 
