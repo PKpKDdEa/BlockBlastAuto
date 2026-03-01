@@ -108,7 +108,7 @@ class Config:
     # User reports offset increases as the piece moves UP the screen.
     DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
-    DRAG_OFFSET_X: float = 0.0      # Horizontal parallax correction (v4.5)
+    DRAG_OFFSET_X: float = 25.0     # Horizontal parallax correction (v4.7.3)
     
     # Vision Throttles (Aggressive Sensitivity)
     VISION_SAT_THRESHOLD: int = 150
