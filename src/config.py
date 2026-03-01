@@ -3,7 +3,7 @@ Configuration for Block Blast automation.
 Stores all calibration values and runtime parameters.
 """
 from dataclasses import dataclass
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 
 
 @dataclass
@@ -108,7 +108,16 @@ class Config:
     # User reports offset increases as the piece moves UP the screen.
     DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
     DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
-    DRAG_OFFSET_X: float = 10.0     # Pixels of pull PER COLUMN from center (v4.8)
+    DRAG_OFFSET_X: float = 26.0     # Legacy linear factor (v4.8)
+    
+    # v4.9 Nonlinear Displacement Tables (Multipliers for Cell Size)
+    # Key: Distance in cells from slot to target
+    DISPLACEMENT_X_TABLE: Dict[int, float] = {
+        1: 0.6, 2: 0.6, 3: 1.2, 4: 1.7, 5: 1.8, 6: 2.1, 7: 4.0, 8: 4.0
+    }
+    DISPLACEMENT_Y_TABLE: Dict[int, float] = {
+        1: 1.6, 2: 1.6, 3: 2.2, 4: 2.4, 5: 3.7, 6: 3.7, 7: 3.7, 8: 3.7
+    }
     
     # Vision Throttles (Aggressive Sensitivity)
     VISION_SAT_THRESHOLD: int = 150
