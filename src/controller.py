@@ -117,6 +117,12 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     dest_x = anchor_center_x + int(anchor_dc * config.CELL_WIDTH)
     dest_y = anchor_center_y + int(anchor_dr * config.CELL_HEIGHT) + int(y_offset)
     
+    # v4.8.1 Fix: Restore ref_line for even-height alignment
+    # Visual center of the piece in grid units
+    piece_center_row = target_row + anchor_dr + piece.height / 2.0
+    ref_line = round(piece_center_row)
+    ref_line = max(1, min(7, ref_line))
+    
     # Alignment Rule: 
     # "place the object block with even number row's center on the line 
     #  and odd number row's center on the target cell"
