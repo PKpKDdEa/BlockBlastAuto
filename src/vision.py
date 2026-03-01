@@ -199,8 +199,8 @@ def read_board(frame: np.ndarray) -> Board:
                     if mask[py, px] > 0:
                         filled_points += 1
             
-            # Majority vote (at least 2 points on to count as filled)
-            is_filled = filled_points >= 2
+            # v4.3 High-Agreement Consensus (at least 4 points on to count as filled)
+            is_filled = filled_points >= 4
             
             board.grid[row, col] = 1 if is_filled else 0
             if is_filled:
@@ -243,9 +243,9 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     v4.2: Separated Board vs Slot logic. Board uses S=30 floor and NO background subtraction.
     """
     # Stage 1: Absolute Vibrancy
-    # v4.2: Extremely sensitive floor for the static board (S=30, V=80)
-    s_floor = 30 if is_board else 80
-    v_floor = 80 if is_board else 140
+    # v4.3: Tightened floors for the board to suppress background mesh/noise
+    s_floor = 50 if is_board else 80
+    v_floor = 110 if is_board else 140
     
     lower_vibrant = np.array([0, s_floor, v_floor]) 
     upper_vibrant = np.array([180, 255, 255])
@@ -253,14 +253,14 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     
     # Stage 2: Color Selective (Boost for difficult segments)
     # Range: Purple/Lavender (H: 130-165, relaxed for board)
-    lower_purp = np.array([130, 30 if is_board else 40, 80 if is_board else 100])
+    lower_purp = np.array([130, 45 if is_board else 40, 90 if is_board else 100])
     upper_purp = np.array([165, 255, 255])
     mask_purp = cv2.inRange(hsv_img, lower_purp, upper_purp)
     
     # Range: Navy/Dark Blue (H: 100-130, board only boost)
     mask_navy = np.zeros_like(mask_purp)
     if is_board:
-        lower_navy = np.array([100, 30, 80])
+        lower_navy = np.array([100, 45, 90])
         upper_navy = np.array([140, 255, 255])
         mask_navy = cv2.inRange(hsv_img, lower_navy, upper_navy)
     
