@@ -196,16 +196,13 @@ def main():
                 y_top, y_bottom = config.GRID_TOP_LEFT[1], config.GRID_BOTTOM_RIGHT[1]
                 progress = max(0, min(1, (y_bottom - end_xy[1]) / (y_bottom - y_top)))
                 current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
-                # v4.5 Directional X-Offset for Visualization
+                # v4.7 Horizon-Based X-Pull for Visualization
                 anchor_dr, anchor_dc = piece.anchor_offset
-                x_offset_mumu = piece.height * 0.4 * config.CELL_WIDTH
-                viz_dest_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH) + int(x_offset_mumu)
+                viz_dest_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH)
                 
-                # v4.6 Horizon-Based X-Offset for Visualization
-                board_mid_x = config.GRID_TOP_LEFT[0] + (config.GRID_COLS * config.CELL_WIDTH) / 2.0
-                if viz_dest_x > board_mid_x: # Right side
+                if move.col >= 4: # Right side
                     viz_dest_x -= int(config.DRAG_OFFSET_X)
-                elif viz_dest_x < board_mid_x: # Left side
+                elif move.col <= 3: # Left side
                     viz_dest_x += int(config.DRAG_OFFSET_X)
 
                 click_xy = (int(viz_dest_x), end_xy[1] + current_offset)

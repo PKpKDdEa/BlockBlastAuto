@@ -112,7 +112,8 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     multiplier = offsets.get(ref_line, 2.5)
     
     y_offset = multiplier * config.CELL_HEIGHT
-    x_offset = piece.height * 0.4 * config.CELL_WIDTH
+    y_offset = multiplier * config.CELL_HEIGHT
+    # x_offset = piece.height * 0.4 * config.CELL_WIDTH  <-- v4.7: Abolishing legacy MuMu shift
     
     # Screen position of the target cell (top-left of piece anchor)
     anchor_center_x, anchor_center_y = cell_center(target_row, target_col)
@@ -121,7 +122,7 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
     # Visual center of the piece in grid units
     anchor_dr, anchor_dc = piece.anchor_offset
     
-    dest_x = anchor_center_x + int(anchor_dc * config.CELL_WIDTH) + int(x_offset)
+    dest_x = anchor_center_x + int(anchor_dc * config.CELL_WIDTH)
     dest_y = anchor_center_y + int(anchor_dr * config.CELL_HEIGHT) + int(y_offset)
     
     # Alignment Rule: 
@@ -140,13 +141,11 @@ def drag_piece(piece: Piece, target_row: int, target_col: int) -> None:
         # Align to cell center (already handled by anchor_center_y + anchor_dr)
         pass
 
-    # v4.6 Horizon-Based X-Offset (Centering Pull)
-    # Pulls the piece toward the board's vertical center line
-    board_center_x = config.GRID_TOP_LEFT[0] + (config.GRID_COLS * config.CELL_WIDTH) / 2.0
-    if dest_x > board_center_x: # Right side of board
-        dest_x -= int(config.DRAG_OFFSET_X) # Pull Left
-    elif dest_x < board_center_x: # Left side of board
-        dest_x += int(config.DRAG_OFFSET_X) # Pull Right
+    # v4.7 Horizon-Based X-Pull (Pull toward board center)
+    if target_col >= 4: # Right side
+        dest_x -= int(config.DRAG_OFFSET_X)
+    elif target_col <= 3: # Left side
+        dest_x += int(config.DRAG_OFFSET_X)
 
     end_pos = (dest_x, dest_y)
     
