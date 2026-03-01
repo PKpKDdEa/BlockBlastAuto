@@ -39,10 +39,9 @@ class TemplateManager:
             if config.DEBUG:
                 print(f"Error loading templates: {e}")
                 
-    def match_and_validate(self, grid: np.ndarray, threshold: float = 0.82) -> Tuple[np.ndarray, float, str, Dict]:
+    def match_and_validate(self, grid: np.ndarray, threshold: float = 0.80) -> Tuple[np.ndarray, float, str, Dict]:
         """
-        Compare input grid against library with NMS and shape validation.
-        Returns (final_grid, score, name, match_info)
+        v4.1: Shift-Invariant Matching (tries 3x3 internal shifts).
         """
         if len(self.templates) == 0:
             return grid, 0.0, "unknown", {"is_new": True}
@@ -51,24 +50,38 @@ class TemplateManager:
         best_score = 0.0
         best_name = "unknown"
         
-        # 1. Multi-template matching
-        for category, pieces in self.data.items():
-            for name, grid_list in pieces.items():
-                template = np.array(grid_list, dtype=np.uint8)
-                int_sum = np.logical_and(grid, template).sum()
-                uni_sum = np.logical_or(grid, template).sum()
+        # Determine current mass (number of blocks)
+        current_mass = np.sum(grid)
+        if current_mass == 0:
+            return grid, 0.0, "empty", {"is_new": False}
+
+        # v4.1 Shift-Invariant Logic:
+        # We try shifting the input grid 1 slot in each direction to find best overlap
+        for dr in [-1, 0, 1]:
+            for dc in [-1, 0, 1]:
+                # Apply shift
+                shifted = self.shift_grid(grid, dr, dc)
+                if np.sum(shifted) == 0: continue
                 
-                if uni_sum == 0: continue
-                score = int_sum / float(uni_sum)
-                
-                if score > best_score:
-                    # v2.3: Mass-Awareness. Check if the candidate matching blocks actually exists.
-                    if self.check_mass_mismatch(grid, template):
-                        best_score = score
-                        best_match = template
-                        best_name = f"{category}/{name}"
+                # Compare against all templates
+                for category, pieces in self.data.items():
+                    for name, grid_list in pieces.items():
+                        template = np.array(grid_list, dtype=np.uint8)
+                        
+                        int_sum = np.logical_and(shifted, template).sum()
+                        uni_sum = np.logical_or(shifted, template).sum()
+                        if uni_sum == 0: continue
+                        
+                        score = int_sum / float(uni_sum)
+                        
+                        if score > best_score:
+                            # Mass check to avoid false positives (e.g. dot matching 2x2)
+                            if self.check_mass_mismatch(shifted, template):
+                                best_score = score
+                                best_match = template
+                                best_name = f"{category}/{name}"
         
-        # 2. Shape Validation Rules (Geometry Enforcement)
+        # 2. Shape Validation Rules
         is_valid = self.validate_shape(grid, best_name, best_score)
         
         match_info = {
@@ -77,19 +90,22 @@ class TemplateManager:
             "category": best_name.split('/')[0] if '/' in best_name else "unknown"
         }
 
-        # 3. High Confidence Snapping with Validation
-        # v2.2: Aggressive Snapping. If score is extremely high (>0.85), trust the match even if validation is iffy.
+        # High Confidence Snapping
         if best_match is not None:
             if (best_score >= threshold and is_valid) or (best_score >= 0.85):
                 return best_match, best_score, best_name, match_info
             
-        # 4. Strict Overread Protection (NMS-like filtering)
-        # If we have a lot of blocks but low score, it's likely a misread/noise
-        block_count = np.sum(grid)
-        if best_score < 0.5 and block_count > 10:
-             return np.zeros((5, 5), dtype=np.uint8), 0.0, "noise", match_info
-
         return grid, best_score, "unknown", match_info
+
+    def shift_grid(self, grid: np.ndarray, dr: int, dc: int) -> np.ndarray:
+        """Shifts a 5x5 grid by (dr, dc)."""
+        res = np.zeros_like(grid)
+        for r in range(5):
+            for c in range(5):
+                nr, nc = r + dr, c + dc
+                if 0 <= nr < 5 and 0 <= nc < 5:
+                    res[nr, nc] = grid[r, c]
+        return res
 
     def validate_shape(self, grid: np.ndarray, name: str, score: float) -> bool:
         """
@@ -167,7 +183,8 @@ def read_board(frame: np.ndarray) -> Board:
     hsv = cv2.cvtColor(board_en, cv2.COLOR_BGR2HSV)
     
     # Unified mask for all colorful blocks on board
-    mask = get_piece_vibrancy_mask(hsv)
+    # v4.1: Pass is_board=True to lower saturation thresholds
+    mask = get_piece_vibrancy_mask(hsv, is_board=True)
     
     # Process each cell
     for row in range(config.GRID_ROWS):
@@ -225,29 +242,31 @@ def classify_cell(patch: np.ndarray) -> bool:
     return np.mean(mask) > 160
 
 
-def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray] = None) -> np.ndarray:
+def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray] = None, is_board: bool = False) -> np.ndarray:
     """
     Unified vibrancy-aware mask for pieces. 
-    v3.7: Strict Shadow Guard (V > 140) for Geometric Precision.
+    v4.1: Lavender Boost + Board-specific lower saturation floor (S=40).
     """
     # Stage 1: Absolute Vibrancy
-    # v3.7: Aggressive shadow rejection (V > 140) to ensure tight BBox
-    lower_vibrant = np.array([0, 80, 140]) 
+    # v4.1: Lower floor for board cells (static) to catch soft Purples/Lavenders
+    s_floor = 40 if is_board else 80
+    v_floor = 100 if is_board else 140
+    
+    lower_vibrant = np.array([0, s_floor, v_floor]) 
     upper_vibrant = np.array([180, 255, 255])
     mask_high_sat = cv2.inRange(hsv_img, lower_vibrant, upper_vibrant)
     
-    # Stage 2: Color Selective
-    lower_r1 = np.array([0, 40, 120])
-    upper_r1 = np.array([100, 255, 255])
+    # Stage 2: Color Selective (Boost for difficult segments)
+    # Range: Purple/Lavender (H: 130-165)
+    lower_purp = np.array([130, 40, 100])
+    upper_purp = np.array([165, 255, 255])
+    mask_purp = cv2.inRange(hsv_img, lower_purp, upper_purp)
     
-    lower_r2 = np.array([145, 40, 120])
-    upper_r2 = np.array([180, 255, 255])
+    # Combine Absolute + Selective
+    mask = cv2.bitwise_or(mask_high_sat, mask_purp)
     
-    mask_r1 = cv2.inRange(hsv_img, lower_r1, upper_r1)
-    mask_r2 = cv2.inRange(hsv_img, lower_r2, upper_r2)
-    
-    # Stage 3: ADAPTIVE BACKGROUND REJECTION
-    if bg_sample is not None:
+    # Stage 3: ADAPTIVE BACKGROUND REJECTION (Mainly for Slots/Pieces)
+    if bg_sample is not None and not is_board:
         bg_h, bg_s, bg_v = bg_sample[0]
         lower_bg = np.array([max(0, bg_h-10), 0, 0])
         upper_bg = np.array([min(180, bg_h+10), min(255, bg_s+20), 255])
