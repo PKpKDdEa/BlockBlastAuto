@@ -136,22 +136,17 @@ class TemplateManager:
             if 7 <= blocks <= 10: # 3x3 variant
                 return True
             return False
-        elif category in ["corners", "l_shapes", "t_shapes", "zs_shapes", "diag_shapes"]:
-            # Complex shapes usually have 3-5 blocks. Loosen range.
+        elif category in ["corners", "l_shapes", "t_shapes", "zs_shapes", "diag_shapes", "rectangles"]:
+            # Complex/Rectangle shapes usually have 3-6 blocks.
             return 2 <= blocks <= 6
             
-        return score > 0.75 # Default fallback for unknown categories
+        return score > 0.80 # Default fallback for unknown categories
 
     def check_mass_mismatch(self, grid: np.ndarray, template: np.ndarray) -> bool:
         """
-        Check if the total volume (number of blocks) is vastly different.
-        Prevents a 4-block piece from matching a 9-block square.
+        v4.1: Ensure the candidate match has exactly the same number of blocks.
         """
-        visual_blocks = np.sum(grid)
-        template_blocks = np.sum(template)
-        
-        # Allow +/- 1 block variance for noise
-        return abs(visual_blocks - template_blocks) <= 2
+        return np.sum(grid) == np.sum(template)
 
     def learn_pattern(self, grid: np.ndarray):
         """[DISABLED in v2.1] - Managed templates only."""
