@@ -39,6 +39,7 @@ def main():
         return
     
     print(f"✓ Found window: {capture.window_title}")
+    print(f"✓ Tray Calibration: {config.TRAY_CELL_SIZE[0]}px Pitch")
     
     # Simulation state
     sim_board = Board(config.GRID_ROWS, config.GRID_COLS)

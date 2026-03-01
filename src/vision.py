@@ -359,26 +359,32 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     piece_cy = by + bh / 2.0
     
     # Inferred dims
-    d = 42.0
+    d = float(config.TRAY_CELL_SIZE[0])
     cols = int(round(bw / d))
     rows = int(round(bh / d))
     cols = max(1, min(5, cols))
     rows = max(1, min(5, rows))
     
+    # v3.8 Geometric Centering (Float Precision)
+    # This ensures the grid is perfectly centered within the colorful bracket
+    piece_cx = bx + bw / 2.0
+    piece_cy = by + bh / 2.0
+    
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     start_r = (5 - rows) // 2
     start_c = (5 - cols) // 2
     
-    # v3.7 Strict d/2 Margin (21px) from colorful border
+    # v3.8 Strict d/2 Margin from colorful border
     margin = d / 2.0
     
     for r_idx in range(rows):
         for c_idx in range(cols):
+            # v3.8 Float spacing prevents accumulation errors
             rel_cx = (c_idx - (cols - 1) / 2.0) * d
             rel_cy = (r_idx - (rows - 1) / 2.0) * d
             
-            cx_cell = int(piece_cx + rel_cx)
-            cy_cell = int(piece_cy + rel_cy)
+            cx_cell = int(round(piece_cx + rel_cx))
+            cy_cell = int(round(piece_cy + rel_cy))
             
             # Sub-grid consensus (9 dots)
             offset = int(d * 0.18)
@@ -388,9 +394,9 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 for mx in [-offset, 0, offset]:
                     px, py = cx_cell + mx, cy_cell + my
                     if 0 <= px < sw and 0 <= py < sh:
-                        # v3.7: Strict margin check for consensus dots
+                        # v3.8: Strict margin check for consensus dots
                         dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(px), float(py)), True)
-                        if mask[py, px] > 0 and dist_from_edge >= margin * 0.35: # Tightened margin logic
+                        if mask[py, px] > 0 and dist_from_edge >= margin * 0.35:
                             points_on += 1
             
             # Majority vote
@@ -550,12 +556,12 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         main_cnt = best_cnt_data[4]
         bx, by, bw, bh = cv2.boundingRect(main_cnt)
         
-        # v3.7 Geometric Centering
+        # v3.8 Geometric Centering (Float Precision)
         piece_cx = bx + bw / 2.0
         piece_cy = by + bh / 2.0
         
-        # Inferred dims
-        d = 42.0
+        # Inferred dims (Use Calibrated Pitch)
+        d = float(config.TRAY_CELL_SIZE[0])
         cols = int(round(bw / d))
         rows = int(round(bh / d))
         cols = max(1, min(5, cols))
@@ -571,8 +577,8 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                 rel_cx = (c_idx - (cols - 1) / 2.0) * d
                 rel_cy = (r_idx - (rows - 1) / 2.0) * d
                 
-                cx_cell = int(piece_cx + rel_cx)
-                cy_cell = int(piece_cy + rel_cy)
+                cx_cell = int(round(piece_cx + rel_cx))
+                cy_cell = int(round(piece_cy + rel_cy))
                 offset = int(d * 0.18)
                 
                 points_on = 0
@@ -580,7 +586,7 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                     for mx in [-offset, 0, offset]:
                         px, py = slot.x + cx_cell + mx, slot.y + cy_cell + my
                         if 0 <= cx_cell + mx < piece_region.shape[1] and 0 <= cy_cell + my < piece_region.shape[0]:
-                            # v3.7 strict d/2 margin test
+                            # v3.8 strict d/2 margin test
                             dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(cx_cell+mx), float(cy_cell+my)), True)
                             is_on = mask[cy_cell + my, cx_cell + mx] > 0 and dist_from_edge >= margin * 0.35
                             

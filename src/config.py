@@ -49,6 +49,27 @@ class Config:
     PIECE_SLOTS: List[GameRegion] = None
     
     def __post_init__(self):
+        # v3.8: Attempt to load from calibration_config.txt automatically
+        import os
+        import ast
+        calib_path = "calibration_config.txt"
+        if os.path.exists(calib_path):
+            try:
+                with open(calib_path, 'r') as f:
+                    lines = f.readlines()
+                    for line in lines:
+                        if '=' in line:
+                            key, val = line.split('=', 1)
+                            key = key.strip()
+                            val = val.strip()
+                            if key == "GRID_TOP_LEFT": self.GRID_TOP_LEFT = ast.literal_eval(val)
+                            elif key == "GRID_BOTTOM_RIGHT": self.GRID_BOTTOM_RIGHT = ast.literal_eval(val)
+                            elif key == "TRAY_CELL_SIZE": self.TRAY_CELL_SIZE = ast.literal_eval(val)
+                            elif key == "TRAY_SLOT_CENTERS": self.TRAY_SLOT_CENTERS = ast.literal_eval(val)
+                print(f"✓ Config: Auto-loaded calibration from {calib_path}")
+            except Exception as e:
+                print(f"! Config: Error loading {calib_path}: {e}")
+
         if self.TRAY_SLOT_CENTERS is None:
             # Default centers for 1080x1920
             self.TRAY_SLOT_CENTERS = [(113, 942), (309, 941), (490, 942)]
