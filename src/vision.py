@@ -736,47 +736,56 @@ def draw_pause_status(vis: np.ndarray, is_paused: bool):
         cv2.putText(vis, text, (tx, ty), font, scale, (0, 190, 255), thickness)
 
 
-def visualize_drag(frame: np.ndarray, piece: Piece, move: Move, start_xy: Tuple[int, int], click_xy: Tuple[int, int], end_xy: Tuple[int, int]) -> np.ndarray:
+def visualize_drag(frame: np.ndarray, piece: Piece, move: Move, 
+                   start_xy: Tuple[int, int], click_xy: Tuple[int, int], end_xy: Tuple[int, int],
+                   mult_x: float = 0.0, mult_y: float = 0.0) -> np.ndarray:
     """
     Visualize the drag move with:
     - Piece Blueprint: Transparent overlay of the piece at its target position.
     - Cell Highlights: Circles on the exact cells being filled.
     - Red Cross: Actual cursor destination (click_xy, where the mouse clicks).
     - Yellow Cross: Intended piece anchor center (end_xy).
+    - v5.0: Enhanced labels for offsets and target coordinates.
     """
     vis = frame.copy()
     x1, y1 = config.GRID_TOP_LEFT
     
     # 1. DRAW PIECE BLUEPRINT & CELL HIGHLIGHTS
-    # We draw where the bot thinks the pieces will land
     for dr, dc in piece.cells:
         r, c = move.row + dr, move.col + dc
         if 0 <= r < 8 and 0 <= c < 8:
-            # Calculate screen center of this specific cell
             cx = int(x1 + c * config.CELL_WIDTH + config.CELL_WIDTH / 2.0)
             cy = int(y1 + r * config.CELL_HEIGHT + config.CELL_HEIGHT / 2.0)
             
-            # Draw a block blueprint (Semi-transparent orange)
             overlay = vis.copy()
             bw, bh = int(config.CELL_WIDTH * 0.8), int(config.CELL_HEIGHT * 0.8)
             cv2.rectangle(overlay, (cx - bw//2, cy - bh//2), (cx + bw//2, cy + bh//2), (0, 165, 255), -1)
             cv2.addWeighted(overlay, 0.5, vis, 0.5, 0, vis)
-            
-            # Precise center dot for this cell
             cv2.circle(vis, (cx, cy), 4, (0, 255, 255), -1)
 
-    # 2. DRAW DRAG PATH
-    # v3.9: Accurate visual feedback for anchoring
+    # 2. DRAW DRAG PATH & CROSSES
     cv2.line(vis, start_xy, click_xy, (200, 200, 200), 1, cv2.LINE_AA)
     
     # Yellow Cross: Visual piece center (anchor point)
     cv2.drawMarker(vis, end_xy, (0, 255, 255), cv2.MARKER_TILTED_CROSS, 20, 2)
-    cv2.putText(vis, "PIECE CENTER", (end_xy[0] + 15, end_xy[1]), 
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
+    
+    # v5.0: Piece Center Labels
+    anchor_dr, anchor_dc = piece.anchor_offset
+    center_r = move.row + anchor_dr + piece.height/2.0
+    center_c = move.col + anchor_dc + piece.width/2.0
+    
+    cv2.putText(vis, f"CENTER: {center_r:.1f}, {center_c:.1f}", (end_xy[0] + 15, end_xy[1] - 10), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    cv2.putText(vis, f"TARGET: ({move.row}, {move.col})", (end_xy[0] + 15, end_xy[1] + 10), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
     
     # Red Cross: Mouse Cursor (where it clicks + offset)
     cv2.drawMarker(vis, click_xy, (0, 0, 255), cv2.MARKER_CROSS, 30, 2)
-    cv2.putText(vis, "CURSOR", (click_xy[0] + 20, click_xy[1]), 
+    
+    # v5.0: Cursor and Offset Labels
+    cv2.putText(vis, f"CURSOR (X_MULT: {mult_x:.2f})", (click_xy[0] + 20, click_xy[1] - 15), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+    cv2.putText(vis, f"OFFSETS (Y_MULT: {mult_y:.2f})", (click_xy[0] + 20, click_xy[1] + 15), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
     
     return vis

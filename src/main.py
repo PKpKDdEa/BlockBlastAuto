@@ -192,9 +192,8 @@ def main():
                 anchor_center_x, anchor_center_y = config.GRID_TOP_LEFT[0] + (move.col + 0.5)*config.CELL_WIDTH, config.GRID_TOP_LEFT[1] + (move.row + 0.5)*config.CELL_HEIGHT
                 end_xy = (int(anchor_center_x), int(anchor_center_y))
                 
-                # v4.8 Linear Displacement Visualization
-                y_progress = (7.0 - move.row) / 7.0
-                current_offset = int(config.DRAG_OFFSET_Y_BOTTOM + y_progress * (config.DRAG_OFFSET_Y_TOP - config.DRAG_OFFSET_Y_BOTTOM))
+                # v4.9 Piecewise Displacement Visualization
+                start_x, start_y = config.TRAY_SLOT_CENTERS[move.piece_index]
                 
                 anchor_dr, anchor_dc = piece.anchor_offset
                 piece_center_x = end_xy[0] + int(anchor_dc * config.CELL_WIDTH)
@@ -202,14 +201,25 @@ def main():
                 
                 end_xy_center = (int(piece_center_x), int(piece_center_y))
                 
-                # Proportional X-Pull
-                col_dist = move.col - 3.5
-                x_pull = col_dist * config.DRAG_OFFSET_X
-                click_x = piece_center_x - x_pull
-
-                click_xy = (int(click_x), int(piece_center_y + current_offset))
+                # Distance in cells
+                dx_cells = round(abs(piece_center_x - start_x) / config.CELL_WIDTH)
+                dy_cells = round(abs(start_y - piece_center_y) / config.CELL_HEIGHT)
                 
-                vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy_center)
+                mult_x = config.DISPLACEMENT_X_TABLE.get(min(8, dx_cells), 0.6)
+                mult_y = config.DISPLACEMENT_Y_TABLE.get(min(8, dy_cells), 1.6)
+                
+                y_offset = int(mult_y * config.CELL_HEIGHT)
+                x_pull = int(mult_x * config.CELL_WIDTH)
+                
+                click_x = piece_center_x
+                if piece_center_x > start_x: # Right
+                    click_x -= x_pull
+                elif piece_center_x < start_x: # Left
+                    click_x += x_pull
+
+                click_xy = (int(click_x), int(piece_center_y + y_offset))
+                
+                vis_drag = visualize_drag(vis, piece, move, start_xy, click_xy, end_xy_center, mult_x, mult_y)
                 cv2.imshow("Bot Vision", vis_drag)
                 cv2.waitKey(1)
                 
