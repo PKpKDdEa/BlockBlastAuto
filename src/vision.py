@@ -634,9 +634,10 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
         crop = cv2.resize(piece_region, (200, 180))
         vis[y_off+20:y_off+200, x_off:x_off+200] = crop
         
-        # Get identification details
-        grid_5x5 = get_piece_grid(piece_region)
-        if grid_5x5 is not None:
+        # Get identification details (v3.9.1: Correct unpacking)
+        grid_data = get_piece_grid(piece_region)
+        if grid_data is not None:
+            grid_5x5, _, _ = grid_data
             final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
             
             # Label
