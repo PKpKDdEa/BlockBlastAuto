@@ -39,8 +39,8 @@ class Config:
     def CELL_HEIGHT(self) -> float:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) / float(self.GRID_ROWS)
     
-    # Piece tray parameters (v5.3: Balanced 40x40 base for 1:1 slots)
-    TRAY_CELL_SIZE: Tuple[int, int] = (40, 40)
+    # Piece tray parameters (v5.4: Revert to 34x34 based on MuMu standard scale)
+    TRAY_CELL_SIZE: Tuple[int, int] = (34, 34)
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     PIECE_SLOTS: List[GameRegion] = None
     
@@ -83,9 +83,8 @@ class Config:
                     min_dist_x = min(min_dist_x, dist)
             
             for (cx, cy) in self.TRAY_SLOT_CENTERS:
-                # v5.3: Restore 1:1 square slots
-                # Size is maximized to min_dist_x - 4px buffer to avoid overlap
-                size = min_dist_x - 4
+                # v5.4: Restore 1:1 square slots with a safe 10px buffer
+                size = min_dist_x - 10
                 
                 self.PIECE_SLOTS.append(GameRegion(x=cx - size//2, y=cy - size//2, width=size, height=size))
     

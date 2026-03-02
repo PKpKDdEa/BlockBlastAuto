@@ -305,13 +305,11 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
         
         mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg))
     
-    # v5.1: Iterative Cleanup for Slots
-    # Opening 2x removes mesh noise (white dots/ghosts)
-    # Closing 1x ensures the bounding box wraps around the block glow/edges properly
+    # v5.4: Soften cleanup to prevent thin piece fragmentation
     kernel = np.ones((3, 3), np.uint8)
     if not is_board:
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
     else:
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         
@@ -396,28 +394,30 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if not contours:
         return None
         
-    candidates = []
+    # v5.4 Contour Merging: Find all pieces near the center and merge them
+    # This handles cyan pieces that are split into multiple contours.
+    valid_contours = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area < 100: continue
+        if area < 80: continue # v5.4: lower area floor
+        
         M = cv2.moments(cnt)
         if M["m00"] == 0: continue
         cx_cnt = int(M["m10"] / M["m00"])
         cy_cnt = int(M["m01"] / M["m00"])
-        dist = abs(cx_cnt - sw//2) + abs(cy_cnt - sh//2)
-        candidates.append((area, dist, cx_cnt, cy_cnt, cnt, M))
         
-    if not candidates:
+        # Must be within 35% of center horizontally/vertically
+        dist_x = abs(cx_cnt - sw//2) / float(sw)
+        dist_y = abs(cy_cnt - sh//2) / float(sh)
+        if dist_x < 0.35 and dist_y < 0.35:
+            valid_contours.append(cnt)
+            
+    if not valid_contours:
         return None
         
-    # v3.7 Centroid Selection
-    best_cnt_data = min(candidates, key=lambda x: x[1])
-    main_cnt = best_cnt_data[4]
-    
-    # v4.4 Clean Trim: Ensure BBox is exactly around visible mask pixels
-    # This prevents 'Grey padding' from shifting the dots
-    M_trim = cv2.moments(main_cnt)
-    bx, by, bw, bh = cv2.boundingRect(main_cnt)
+    # Merge all valid contours into one
+    all_points = np.concatenate(valid_contours)
+    bx, by, bw, bh = cv2.boundingRect(all_points)
     
     # Refine BBox by checking mask density if needed (Optional for noise)
     # But usually boundingRect on a cleaned mask is sufficient.
@@ -433,8 +433,8 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     d_y = bh / float(rows) if rows > 0 else d_base
     d = (d_x + d_y) / 2.0
     
-    # Sanity check: if adaptive d is too far from base, use base
-    if abs(d - d_base) > d_base * 0.4:
+    # v5.4: Adaptive Pitch Guard (Tightened sanity check)
+    if abs(d - d_base) > d_base * 0.25:
         d = d_base
     
     # v5.1 Robust Centering:
