@@ -91,16 +91,48 @@ class TemplateManager:
         }
 
         # v5.1 Aggressive Snapping:
-        # If we have a match with IDENTICAL mass, force-snap it even if score is lower than threshold.
-        # This eliminates 'unknown' for noisy but structurally complete pieces.
         if best_match is not None:
             if best_score >= threshold and is_valid:
                 return best_match, best_score, best_name, match_info
             
-            # Forced Snap for exact mass matches (Very high confidence in topology)
+            # Forced Snap for exact mass matches
             if np.sum(best_match) == current_mass and best_score >= 0.60:
                 match_info["is_forced"] = True
                 return best_match, best_score, best_name, match_info
+        
+        # v5.6: Mass-Based Fallback Snapping
+        # If no match found, find the template with the closest mass
+        closest_match = None
+        closest_name = "unknown"
+        closest_mass_diff = 999
+        closest_score = 0.0
+        for category, pieces in self.data.items():
+            for name, grid_list in pieces.items():
+                template = np.array(grid_list, dtype=np.uint8)
+                t_mass = np.sum(template)
+                mass_diff = abs(int(t_mass) - int(current_mass))
+                if mass_diff < closest_mass_diff:
+                    closest_mass_diff = mass_diff
+                    closest_match = template
+                    closest_name = f"{category}/{name}"
+                    # Calculate IoU for this closest-mass template
+                    int_sum = np.logical_and(grid, template).sum()
+                    uni_sum = np.logical_or(grid, template).sum()
+                    closest_score = int_sum / float(uni_sum) if uni_sum > 0 else 0.0
+                elif mass_diff == closest_mass_diff:
+                    # Tiebreak: pick the one with higher IoU
+                    int_sum = np.logical_and(grid, template).sum()
+                    uni_sum = np.logical_or(grid, template).sum()
+                    score = int_sum / float(uni_sum) if uni_sum > 0 else 0.0
+                    if score > closest_score:
+                        closest_match = template
+                        closest_name = f"{category}/{name}"
+                        closest_score = score
+        
+        if closest_match is not None and closest_mass_diff <= 2:
+            match_info["is_mass_fallback"] = True
+            match_info["mass_diff"] = closest_mass_diff
+            return closest_match, closest_score, closest_name, match_info
             
         return grid, best_score, "unknown", match_info
 
@@ -351,7 +383,7 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
     if grid_data is None:
         return None, False, 0.0, 0.0
         
-    grid_5x5, p_cx, p_cy = grid_data
+    grid_5x5, p_cx, p_cy, _d, _ax, _ay, _cols, _rows = grid_data
     
     # SNAPPING: Use template manager to clean up the detection
     final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
@@ -423,30 +455,24 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Refine BBox by checking mask density if needed (Optional for noise)
     # But usually boundingRect on a cleaned mask is sufficient.
     
-    # Infer cell pitch
-    # v5.2: Adaptive Pitch Estimation (Handles high-res screenshots)
+    # v5.6: Dynamic Pitch from Bounding Box
+    # Use TRAY_CELL_SIZE as initial estimate, then derive actual d from bbox
     d_base = float(config.TRAY_CELL_SIZE[0])
     
-    # v5.5: Improve initial cols/rows estimation (round UP for pieces > 0.7 cell width)
-    cols = max(1, min(5, int(round(bw / (d_base * 0.95)))))
-    rows = max(1, min(5, int(round(bh / (d_base * 0.95)))))
+    # Estimate cols/rows from bbox using baseline pitch
+    cols = max(1, min(5, int(round(bw / d_base))))
+    rows = max(1, min(5, int(round(bh / d_base))))
     
-    # Calculate effective pitch based on detected bounding box
+    # v5.6: Compute actual pitch directly from bounding box
+    # This makes detection immune to TRAY_CELL_SIZE calibration errors
     d_x = bw / float(cols) if cols > 0 else d_base
     d_y = bh / float(rows) if rows > 0 else d_base
     d = (d_x + d_y) / 2.0
-    
-    # v5.4: Adaptive Pitch Guard (Tightened sanity check)
-    if abs(d - d_base) > d_base * 0.25:
-        d = d_base
         
     if config.DEBUG:
         print(f"  Scale: BBox({bw}x{bh}) -> Inferred({cols}x{rows}) d={d:.1f} (base={d_base})")
     
-    # v5.1 Robust Centering:
-    # Instead of Top-Left (which drifts if BX/BY has noise), 
-    # use the exact center of the BBox and then find the 'ideal' top-left from there.
-    # This centers the 5x5 sampling grid on the piece mass.
+    # Center-based anchoring
     center_x = bx + bw / 2.0
     center_y = by + bh / 2.0
     anchor_x = center_x - ((cols - 1) * d) / 2.0
@@ -456,12 +482,10 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     start_r = (5 - rows) // 2
     start_c = (5 - cols) // 2
     
-    # v4.0 Margin logic (Stricter for low-height pieces)
     margin = d / 2.0
     
     for r_idx in range(rows):
         for c_idx in range(cols):
-            # v4.0 Precise offsets from Top-Left Anchor
             cx_cell = int(round(anchor_x + c_idx * d))
             cy_cell = int(round(anchor_y + r_idx * d))
             
@@ -473,25 +497,23 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
                 for mx in [-offset, 0, offset]:
                     px, py = cx_cell + mx, cy_cell + my
                     if 0 <= px < sw and 0 <= py < sh:
-                        # v4.0: Margin check relative to contour
                         dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(px), float(py)), True)
                         if mask[py, px] > 0 and dist_from_edge >= margin * 0.35:
                             points_on += 1
             
-            # Majority vote
             if points_on >= 4:
                 grid_5x5[start_r + r_idx, start_c + c_idx] = 1
                 
-    # Visual Piece Center for Piece class (Geometric Centroid for handle)
     piece_cx = bx + bw / 2.0
     piece_cy = by + bh / 2.0
     
     if config.DEBUG:
         block_count = np.sum(grid_5x5)
         if block_count > 0:
-            print(f"  [v4.0 Top-Left] Pitch: {d}px, Blocks: {block_count}")
+            print(f"  [v5.6] Pitch: {d:.1f}px, Blocks: {block_count}")
             
-    return grid_5x5, piece_cx, piece_cy
+    # v5.6: Return extended metadata for visualization reuse
+    return grid_5x5, piece_cx, piece_cy, d, anchor_x, anchor_y, cols, rows
 
 
 def load_piece_templates() -> dict:
@@ -597,24 +619,27 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
             cv2.circle(vis, (cx, cy), 3, color, -1)
     
-    # Draw piece slots and their internal relative grids (v3.7 Geometric logic)
+    # Draw piece slots and their internal relative grids (v5.6: Unified with get_piece_grid)
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
         
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
         
-        # v3.7 Enhanced pre-processing (CLAHE)
-        # Use v3.7 Strict Shadow Guard (V > 140)
+        # v5.6: Call get_piece_grid and reuse its exact metadata
+        grid_data = get_piece_grid(piece_region)
+        if grid_data is None: continue
+        
+        grid_5x5, _, _, d, anchor_x, anchor_y, cols, rows = grid_data
+        
+        # Reconstruct mask and contour for dot visualization
         lab = cv2.cvtColor(piece_region, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
+        l_ch, a_ch, b_ch = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
-        cl = clahe.apply(l)
-        limg = cv2.merge((cl, a, b))
+        cl = clahe.apply(l_ch)
+        limg = cv2.merge((cl, a_ch, b_ch))
         piece_enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
         hsv = cv2.cvtColor(piece_enhanced, cv2.COLOR_BGR2HSV)
-        
-        # Background Sample
         h, w = hsv.shape[:2]
         corners = [hsv[1:6, 1:6], hsv[1:6, w-6:w-1], hsv[h-6:h-1, 1:6], hsv[h-6:h-1, w-6:w-1]]
         bg_sample = np.mean(np.concatenate([c.reshape(-1, 3) for c in corners]), axis=0).reshape(1, 3)
@@ -622,43 +647,20 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours: continue
+        valid_contours = [cnt for cnt in contours if cv2.contourArea(cnt) >= 80]
+        if not valid_contours: continue
+        all_points = np.concatenate(valid_contours)
+        main_cnt = cv2.convexHull(all_points)
+        bx, by, bw, bh = cv2.boundingRect(all_points)
         
-        candidates = []
-        for cnt in contours:
-            area = cv2.contourArea(cnt)
-            if area < 100: continue
-            M = cv2.moments(cnt)
-            if M["m00"] == 0: continue
-            cx_cnt = int(M["m10"] / M["m00"])
-            cy_cnt = int(M["m01"] / M["m00"])
-            dist = abs(cx_cnt - piece_region.shape[1]//2) + abs(cy_cnt - piece_region.shape[0]//2)
-            candidates.append((area, dist, cx_cnt, cy_cnt, cnt))
-            
-        if not candidates: continue
-        best_cnt_data = min(candidates, key=lambda x: x[1])
-        main_cnt = best_cnt_data[4]
-        bx, by, bw, bh = cv2.boundingRect(main_cnt)
-        
-        # v4.0 Top-Left Anchoring (Most Stable)
-        # This prevents odd/even centering drift by always starting d/2 from the top-left edge
-        d = float(config.TRAY_CELL_SIZE[0])
-        anchor_x = bx + d / 2.0
-        anchor_y = by + d / 2.0
-        
-        # Inferred dims (Use Calibrated Pitch)
-        cols = int(round(bw / d))
-        rows = int(round(bh / d))
-        cols = max(1, min(5, cols))
-        rows = max(1, min(5, rows))
-        margin = d / 2.0
-
         # Draw the "White Bracket" (Tight Bounding Box)
         cv2.rectangle(vis, (slot.x + bx, slot.y + by), (slot.x + bx + bw, slot.y + by + bh), (255, 255, 255), 1)
+        
+        margin = d / 2.0
 
-        # Draw the inferred grid samples
+        # Draw the inferred grid samples using the EXACT same d and anchor as get_piece_grid
         for r_idx in range(rows):
             for c_idx in range(cols):
-                # v4.0 Precise offsets from Top-Left Anchor
                 cx_cell = int(round(anchor_x + c_idx * d))
                 cy_cell = int(round(anchor_y + r_idx * d))
                 offset = int(d * 0.18)
@@ -668,7 +670,6 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
                     for mx in [-offset, 0, offset]:
                         px, py = slot.x + cx_cell + mx, slot.y + cy_cell + my
                         if 0 <= cx_cell + mx < piece_region.shape[1] and 0 <= cy_cell + my < piece_region.shape[0]:
-                            # v4.0 strict margin test
                             dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(cx_cell+mx), float(cy_cell+my)), True)
                             is_on = mask[cy_cell + my, cx_cell + mx] > 0 and dist_from_edge >= margin * 0.35
                             
@@ -711,10 +712,10 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
         crop = cv2.resize(piece_region, (200, 180))
         vis[y_off+20:y_off+200, x_off:x_off+200] = crop
         
-        # Get identification details (v3.9.1: Correct unpacking)
+        # Get identification details (v5.6: Correct 8-tuple unpacking)
         grid_data = get_piece_grid(piece_region)
         if grid_data is not None:
-            grid_5x5, _, _ = grid_data
+            grid_5x5, _, _, _d, _ax, _ay, _cols, _rows = grid_data
             final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
             
             # Label
