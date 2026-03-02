@@ -260,10 +260,9 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     v4.2: Separated Board vs Slot logic. Board uses S=30 floor and NO background subtraction.
     """
     # Stage 1: Absolute Vibrancy
-    # v4.3: Tightened floors for the board to suppress background mesh/noise
-    # v5.2: Hardened floors for slots to reject dark shadows (Blocks: 10 bug)
-    s_floor = 50 if is_board else 100
-    v_floor = 110 if is_board else 160
+    # v5.3: Relaxed floors for slots to catch cyan/vampire pieces
+    s_floor = 50 if is_board else 80
+    v_floor = 110 if is_board else 130
     
     lower_vibrant = np.array([0, s_floor, v_floor]) 
     upper_vibrant = np.array([180, 255, 255])

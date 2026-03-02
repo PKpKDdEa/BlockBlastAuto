@@ -39,8 +39,8 @@ class Config:
     def CELL_HEIGHT(self) -> float:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) / float(self.GRID_ROWS)
     
-    # Piece tray parameters (v5.2: 50x50 default for high-res)
-    TRAY_CELL_SIZE: Tuple[int, int] = (50, 50)
+    # Piece tray parameters (v5.3: Balanced 40x40 base for 1:1 slots)
+    TRAY_CELL_SIZE: Tuple[int, int] = (40, 40)
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     PIECE_SLOTS: List[GameRegion] = None
     
@@ -83,15 +83,11 @@ class Config:
                     min_dist_x = min(min_dist_x, dist)
             
             for (cx, cy) in self.TRAY_SLOT_CENTERS:
-                # v5.2: Enlarge slots significantly (7.5x pitch)
-                # Width is capped to avoid horizontal overlap, but height is unrestricted
-                width = int(self.TRAY_CELL_SIZE[0] * 7.5)
-                if min_dist_x < width:
-                    width = min_dist_x - 4 # 4px buffer
+                # v5.3: Restore 1:1 square slots
+                # Size is maximized to min_dist_x - 4px buffer to avoid overlap
+                size = min_dist_x - 4
                 
-                height = int(self.TRAY_CELL_SIZE[1] * 7.5)
-                
-                self.PIECE_SLOTS.append(GameRegion(x=cx - width//2, y=cy - height//2, width=width, height=height))
+                self.PIECE_SLOTS.append(GameRegion(x=cx - size//2, y=cy - size//2, width=size, height=size))
     
     # Mouse control
     MOUSE_DRAG_DURATION_MS: int = 300  # Duration of drag in milliseconds
