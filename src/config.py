@@ -17,22 +17,18 @@ class GameRegion:
 
 @dataclass
 class Config:
-    """Main configuration for the Block Blast bot."""
+    """Main configuration for the bot."""
     
     # Window detection
-    WINDOW_TITLE: str = "Android Device"  # Targeting MuMu Emulator as seen in process list
-    
-    # Game region (will be calibrated)
-    # Default values for 1080x1920 resolution
-    GAME_REGION: GameRegion = GameRegion(x=0, y=0, width=1080, height=1920)
+    WINDOW_TITLE: str = "Android Device"
     
     # Grid configuration
     GRID_ROWS: int = 8
     GRID_COLS: int = 8
     
-    # Grid boundaries (screen coordinates, to be calibrated)
-    GRID_TOP_LEFT: Tuple[int, int] = (35, 229)  # (x, y)
-    GRID_BOTTOM_RIGHT: Tuple[int, int] = (586, 780)  # (x, y)
+    # Board region (screen coordinates, to be calibrated)
+    GRID_TOP_LEFT: Tuple[int, int] = (41, 238)
+    GRID_BOTTOM_RIGHT: Tuple[int, int] = (594, 791)
     
     # Computed cell dimensions
     @property
@@ -43,8 +39,8 @@ class Config:
     def CELL_HEIGHT(self) -> float:
         return (self.GRID_BOTTOM_RIGHT[1] - self.GRID_TOP_LEFT[1]) / float(self.GRID_ROWS)
     
-    # Tray configuration (Sampling pieces at bottom)
-    TRAY_CELL_SIZE: Tuple[int, int] = (42, 42)  # Calibrated size (v3.0 Precision)
+    # Piece tray parameters (v5.2: 50x50 default for high-res)
+    TRAY_CELL_SIZE: Tuple[int, int] = (50, 50)
     TRAY_SLOT_CENTERS: List[Tuple[int, int]] = None
     PIECE_SLOTS: List[GameRegion] = None
     
@@ -73,27 +69,29 @@ class Config:
 
         if self.TRAY_SLOT_CENTERS is None:
             # Default centers for 1080x1920
-            self.TRAY_SLOT_CENTERS = [(113, 942), (309, 941), (490, 942)]
+            self.TRAY_SLOT_CENTERS = [(134, 942), (320, 941), (506, 942)]
             
         if self.PIECE_SLOTS is None:
-            # Calibrated piece slots (Strict 5.0x bounds to avoid horizontal overlap)
+            # v5.2: Enlarge slots to 7.5x and remove height cap to fit 1x5 vertical pieces
             self.PIECE_SLOTS = []
             
-            # Calculate min distance between centers for overlap prevention
-            min_dist = 999
+            # Calculate min horizontal distance for overlap prevention
+            min_dist_x = 999
             if len(self.TRAY_SLOT_CENTERS) >= 2:
                 for i in range(len(self.TRAY_SLOT_CENTERS) - 1):
                     dist = abs(self.TRAY_SLOT_CENTERS[i+1][0] - self.TRAY_SLOT_CENTERS[i][0])
-                    min_dist = min(min_dist, dist)
+                    min_dist_x = min(min_dist_x, dist)
             
             for (cx, cy) in self.TRAY_SLOT_CENTERS:
-                # Enforce SQUARE slots: height = width
-                # Use 5.0x multiplier, but cap at the distance between slots - 2px buffer
-                size = int(self.TRAY_CELL_SIZE[0] * 5.0)
-                if min_dist < size:
-                    size = min_dist - 2
+                # v5.2: Enlarge slots significantly (7.5x pitch)
+                # Width is capped to avoid horizontal overlap, but height is unrestricted
+                width = int(self.TRAY_CELL_SIZE[0] * 7.5)
+                if min_dist_x < width:
+                    width = min_dist_x - 4 # 4px buffer
                 
-                self.PIECE_SLOTS.append(GameRegion(x=cx - size//2, y=cy - size//2, width=size, height=size))
+                height = int(self.TRAY_CELL_SIZE[1] * 7.5)
+                
+                self.PIECE_SLOTS.append(GameRegion(x=cx - width//2, y=cy - height//2, width=width, height=height))
     
     # Mouse control
     MOUSE_DRAG_DURATION_MS: int = 300  # Duration of drag in milliseconds
@@ -105,18 +103,14 @@ class Config:
     
     # Drag Offsets (Phase 5 fix)
     # The piece is held ABOVE the cursor.
-    # User reports offset increases as the piece moves UP the screen.
-    DRAG_OFFSET_Y_BOTTOM: int = 150  # Offset at the bottom (piece slots)
-    DRAG_OFFSET_Y_TOP: int = 300     # Offset at the top of the board
-    DRAG_OFFSET_X: float = 26.0     # Legacy linear factor (v4.8)
     
     # v4.9 Nonlinear Displacement Tables (Multipliers for Cell Size)
     # Key: Distance in cells from slot to target
     DISPLACEMENT_X_TABLE: Dict[int, float] = field(default_factory=lambda: {
-        1: 0.6, 2: 0.6, 3: 1.2, 4: 1.7, 5: 1.8, 6: 2.1, 7: 4.0, 8: 4.0
+        0: 0, 1: 0.1, 2: 0.35, 3: 0.5, 4: 1.1, 5: 1.4, 6: 1.95, 7: 2.5, 8: 2.8
     })
     DISPLACEMENT_Y_TABLE: Dict[int, float] = field(default_factory=lambda: {
-        1: 1.6, 2: 1.6, 3: 2.2, 4: 2.4, 5: 3.7, 6: 3.7, 7: 3.7, 8: 3.7
+        1: 1, 2: 1.8, 3: 2.3, 4: 2.4, 5: 2.5, 6: 2.8, 7: 3.0, 8: 4.1, 9: 4.5
     })
     
     # Vision Throttles (Aggressive Sensitivity)

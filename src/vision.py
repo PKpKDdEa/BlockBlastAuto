@@ -261,8 +261,9 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     """
     # Stage 1: Absolute Vibrancy
     # v4.3: Tightened floors for the board to suppress background mesh/noise
-    s_floor = 50 if is_board else 80
-    v_floor = 110 if is_board else 140
+    # v5.2: Hardened floors for slots to reject dark shadows (Blocks: 10 bug)
+    s_floor = 50 if is_board else 100
+    v_floor = 110 if is_board else 160
     
     lower_vibrant = np.array([0, s_floor, v_floor]) 
     upper_vibrant = np.array([180, 255, 255])
@@ -423,11 +424,19 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # But usually boundingRect on a cleaned mask is sufficient.
     
     # Infer cell pitch
-    d = float(config.TRAY_CELL_SIZE[0])
-    cols = int(round(bw / d))
-    rows = int(round(bh / d))
-    cols = max(1, min(5, cols))
-    rows = max(1, min(5, rows))
+    # v5.2: Adaptive Pitch Estimation (Handles high-res screenshots)
+    d_base = float(config.TRAY_CELL_SIZE[0])
+    cols = max(1, min(5, int(round(bw / d_base))))
+    rows = max(1, min(5, int(round(bh / d_base))))
+    
+    # Calculate effective pitch based on detected bounding box
+    d_x = bw / float(cols) if cols > 0 else d_base
+    d_y = bh / float(rows) if rows > 0 else d_base
+    d = (d_x + d_y) / 2.0
+    
+    # Sanity check: if adaptive d is too far from base, use base
+    if abs(d - d_base) > d_base * 0.4:
+        d = d_base
     
     # v5.1 Robust Centering:
     # Instead of Top-Left (which drifts if BX/BY has noise), 
