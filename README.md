@@ -45,7 +45,7 @@ A high-performance Python automation system designed to play Block Blast on Andr
 
 1. **Install dependencies**:
    ```bash
-   pip install opencv-python numpy pywin32 keyboard
+   pip install requirements.txt
    ```
 2. **Start your emulator** (MuMu / LDPlayer / Google Play Games).
 3. **Run calibration**:
