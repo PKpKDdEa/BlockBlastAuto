@@ -90,21 +90,38 @@ class TemplateManager:
             "category": best_name.split('/')[0] if '/' in best_name else "unknown"
         }
 
-        # High Confidence Snapping
+        # v5.1 Aggressive Snapping:
+        # If we have a match with IDENTICAL mass, force-snap it even if score is lower than threshold.
+        # This eliminates 'unknown' for noisy but structurally complete pieces.
         if best_match is not None:
-            if (best_score >= threshold and is_valid) or (best_score >= 0.85):
+            if best_score >= threshold and is_valid:
+                return best_match, best_score, best_name, match_info
+            
+            # Forced Snap for exact mass matches (Very high confidence in topology)
+            if np.sum(best_match) == current_mass and best_score >= 0.60:
+                match_info["is_forced"] = True
                 return best_match, best_score, best_name, match_info
             
         return grid, best_score, "unknown", match_info
 
     def shift_grid(self, grid: np.ndarray, dr: int, dc: int) -> np.ndarray:
-        """Shifts a 5x5 grid by (dr, dc)."""
+        """
+        Shifts a 5x5 grid by (dr, dc).
+        v5.1: Returns all zeros if mass is lost (shift out of bounds).
+        """
         res = np.zeros_like(grid)
+        original_mass = np.sum(grid)
         for r in range(5):
             for c in range(5):
+                if grid[r, c] == 0: continue
                 nr, nc = r + dr, c + dc
                 if 0 <= nr < 5 and 0 <= nc < 5:
-                    res[nr, nc] = grid[r, c]
+                    res[nr, nc] = 1
+        
+        # Abort if blocks were lost
+        if np.sum(res) != original_mass:
+            return np.zeros_like(grid)
+            
         return res
 
     def validate_shape(self, grid: np.ndarray, name: str, score: float) -> bool:
@@ -288,12 +305,16 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
         
         mask = cv2.bitwise_and(mask, cv2.bitwise_not(mask_bg))
     
-    # v3.7: Cleanup and Thick Dilation
-    
-    # v3.7: Cleanup and Thick Dilation
-    # v4.4: Cleanup and Tight Dilation (Reduced iterations for pieces to avoid oversized BBox)
+    # v5.1: Iterative Cleanup for Slots
+    # Opening 2x removes mesh noise (white dots/ghosts)
+    # Closing 1x ensures the bounding box wraps around the block glow/edges properly
     kernel = np.ones((3, 3), np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    if not is_board:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    else:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        
     mask = cv2.dilate(mask, kernel, iterations=1 if not is_board else 2)
     
     return mask
@@ -401,17 +422,21 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Refine BBox by checking mask density if needed (Optional for noise)
     # But usually boundingRect on a cleaned mask is sufficient.
     
-    # Inferred dims
+    # Infer cell pitch
     d = float(config.TRAY_CELL_SIZE[0])
     cols = int(round(bw / d))
     rows = int(round(bh / d))
     cols = max(1, min(5, cols))
     rows = max(1, min(5, rows))
     
-    # v4.0 Top-Left Anchoring (Most Stable)
-    # This prevents odd/even centering drift by always starting d/2 from the top-left edge
-    anchor_x = bx + d / 2.0
-    anchor_y = by + d / 2.0
+    # v5.1 Robust Centering:
+    # Instead of Top-Left (which drifts if BX/BY has noise), 
+    # use the exact center of the BBox and then find the 'ideal' top-left from there.
+    # This centers the 5x5 sampling grid on the piece mass.
+    center_x = bx + bw / 2.0
+    center_y = by + bh / 2.0
+    anchor_x = center_x - ((cols - 1) * d) / 2.0
+    anchor_y = center_y - ((rows - 1) * d) / 2.0
     
     grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
     start_r = (5 - rows) // 2
