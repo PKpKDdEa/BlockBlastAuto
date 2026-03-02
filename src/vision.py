@@ -426,8 +426,10 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # Infer cell pitch
     # v5.2: Adaptive Pitch Estimation (Handles high-res screenshots)
     d_base = float(config.TRAY_CELL_SIZE[0])
-    cols = max(1, min(5, int(round(bw / d_base))))
-    rows = max(1, min(5, int(round(bh / d_base))))
+    
+    # v5.5: Improve initial cols/rows estimation (round UP for pieces > 0.7 cell width)
+    cols = max(1, min(5, int(round(bw / (d_base * 0.95)))))
+    rows = max(1, min(5, int(round(bh / (d_base * 0.95)))))
     
     # Calculate effective pitch based on detected bounding box
     d_x = bw / float(cols) if cols > 0 else d_base
@@ -437,6 +439,9 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     # v5.4: Adaptive Pitch Guard (Tightened sanity check)
     if abs(d - d_base) > d_base * 0.25:
         d = d_base
+        
+    if config.DEBUG:
+        print(f"  Scale: BBox({bw}x{bh}) -> Inferred({cols}x{rows}) d={d:.1f} (base={d_base})")
     
     # v5.1 Robust Centering:
     # Instead of Top-Left (which drifts if BX/BY has noise), 
