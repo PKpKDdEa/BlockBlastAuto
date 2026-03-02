@@ -417,6 +417,7 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
         
     # Merge all valid contours into one
     all_points = np.concatenate(valid_contours)
+    main_cnt = cv2.convexHull(all_points) # v5.4.1: Fix NameError by providing main_cnt
     bx, by, bw, bh = cv2.boundingRect(all_points)
     
     # Refine BBox by checking mask density if needed (Optional for noise)
