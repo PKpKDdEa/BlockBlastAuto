@@ -4,6 +4,7 @@ Stores all calibration values and runtime parameters.
 """
 from dataclasses import dataclass, field
 from typing import Tuple, List, Dict
+import os
 
 
 @dataclass
@@ -45,25 +46,32 @@ class Config:
     PIECE_SLOTS: List[GameRegion] = None
     
     def __post_init__(self):
-        # v3.8: Attempt to load from calibration_config.txt automatically
-        import os
-        import ast
+        # v3.8: Attempt to load from calibration_config.txt automatically.
+        # Use exec on the trusted local calibration file so multiline Python-like
+        # values such as lists and GameRegion(...) entries load correctly.
         calib_path = "calibration_config.txt"
         if os.path.exists(calib_path):
             try:
-                with open(calib_path, 'r') as f:
-                    lines = f.readlines()
-                    for line in lines:
-                        if '=' in line:
-                            key, val = line.split('=', 1)
-                            key = key.strip()
-                            val = val.strip()
-                            if key == "GRID_TOP_LEFT": self.GRID_TOP_LEFT = ast.literal_eval(val)
-                            elif key == "GRID_BOTTOM_RIGHT": self.GRID_BOTTOM_RIGHT = ast.literal_eval(val)
-                            elif key == "TRAY_CELL_SIZE": self.TRAY_CELL_SIZE = ast.literal_eval(val)
-                            elif key == "TRAY_SLOT_CENTERS": self.TRAY_SLOT_CENTERS = ast.literal_eval(val)
-                            elif key == "DRAG_OFFSET_X": self.DRAG_OFFSET_X = float(val)
-                print(f"✓ Config: Auto-loaded calibration from {calib_path}")
+                with open(calib_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+
+                namespace = {"GameRegion": GameRegion}
+                exec(content, namespace, namespace)
+
+                for key in [
+                    "GRID_TOP_LEFT",
+                    "GRID_BOTTOM_RIGHT",
+                    "TRAY_CELL_SIZE",
+                    "TRAY_SLOT_CENTERS",
+                    "PIECE_SLOTS",
+                    "WINDOW_TITLE",
+                    "ADB_PATH",
+                    "ADB_DEVICE_ID",
+                    "CONTROL_BACKEND",
+                ]:
+                    if key in namespace:
+                        setattr(self, key, namespace[key])
+                print(f"[OK] Config: Auto-loaded calibration from {calib_path}")
             except Exception as e:
                 print(f"! Config: Error loading {calib_path}: {e}")
 
@@ -91,6 +99,23 @@ class Config:
     # Mouse control
     MOUSE_DRAG_DURATION_MS: int = 300  # Duration of drag in milliseconds
     MOUSE_MOVE_RANDOMNESS: int = 3  # Pixels of randomness to add
+
+    # Input backend and drag model
+    # CONTROL_BACKEND: "pyautogui" or "adb"
+    CONTROL_BACKEND: str = "adb"
+    # Coordinates from calibration tool are window-relative by default
+    COORDINATE_SPACE: str = "window-relative"  # "window-relative" or "screen-absolute"
+    # DRAG_MODEL: "ratio" (recommended) or "table" (legacy piecewise)
+    DRAG_MODEL: str = "ratio"
+    # Empirical cursor-to-piece movement ratio (conversation reference)
+    DRAG_DISTANCE_RATIO: float = 0.725
+    # Fixed vertical lift of piece above cursor during drag
+    DRAG_LIFT_Y: int = 26
+
+    # ADB control settings
+    ADB_PATH: str = "adb"
+    ADB_DEVICE_ID: str = ""  # optional, e.g. emulator-5554
+    ADB_DRAG_DURATION_MS: int = 220
     
     # Vision parameters
     FILLED_CELL_COLOR_HSV_LOWER: Tuple[int, int, int] = (0, 0, 100)  # To be tuned
@@ -102,10 +127,10 @@ class Config:
     # v4.9 Nonlinear Displacement Tables (Multipliers for Cell Size)
     # Key: Distance in cells from slot to target
     DISPLACEMENT_X_TABLE: Dict[int, float] = field(default_factory=lambda: {
-        0: 0, 1: 0.1, 2: 0.35, 3: 0.5, 4: 1.1, 5: 1.4, 6: 1.95, 7: 2.5, 8: 2.8
+        0: 0, 1: 0.1, 2: 0.55, 3: 0.6, 4: 1.3, 5: 1.5, 6: 1.85, 7: 2.5, 8: 2.8
     })
     DISPLACEMENT_Y_TABLE: Dict[int, float] = field(default_factory=lambda: {
-        1: 1, 2: 1.8, 3: 2.3, 4: 2.4, 5: 2.5, 6: 2.8, 7: 3.0, 8: 4.1, 9: 4.5
+        1: 1, 2: 1.8, 3: 2.2, 4: 2.4, 5: 2.6, 6: 3.0, 7: 3.1, 8: 4.0, 9: 4.4
     })
     
     # Vision Throttles (Aggressive Sensitivity)
@@ -120,7 +145,7 @@ class Config:
     DEBUG: bool = True
     SAVE_DEBUG_FRAMES: bool = False
     HOTKEY_PAUSE: str = "f10"
-    HOTKEY_AUTO_TOGGLE: str = "f11"
+    HOTKEY_AUTO_TOGGLE: str = "f5"
     AUTO_PLAY: bool = False # Start in observation mode by default
     
     # Heuristic Weights (Phase 3 improvements)
@@ -129,6 +154,13 @@ class Config:
     WEIGHT_BUMPINESS: float = -0.5
     WEIGHT_NEAR_COMPLETE: float = 3.0
     WEIGHT_STREAK_BONUS: float = 20.0
+
+    # Oracle integration
+    # ORACLE_MODE: "internal" (current solver), "external_cmd", or "http"
+    ORACLE_MODE: str = "external_cmd"
+    ORACLE_COMMAND: str = ""
+    ORACLE_URL: str = ""
+    ORACLE_TIMEOUT_MS: int = 1500
     
     def save(self, path: str = "config.json"):
         """Save weights to JSON."""

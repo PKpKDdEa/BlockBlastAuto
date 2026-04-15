@@ -79,9 +79,9 @@ def collect_pieces():
                 # Extract piece region
                 piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
                 
-                # Detect mask
-                mask = detect_piece_mask(piece_region)
-                
+                # Detect mask/grid
+                mask, _is_new, _cx, _cy = detect_piece_mask(piece_region)
+
                 if mask is not None and np.sum(mask) > 0:
                     # Save piece image and mask
                     piece_filename = f"piece_{piece_count:03d}_slot{slot_idx}.png"

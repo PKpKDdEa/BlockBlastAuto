@@ -8,6 +8,7 @@ def evaluate_board(board: Board) -> float:
     """
     Evaluate board state using weighted heuristic features.
     """
+    board.sync_bitboard_from_grid()
     score = 0.0
     
     # 1. Empty cells (count zeros)
@@ -126,6 +127,7 @@ def best_move(board: Board, pieces: List[Piece], time_budget_ms: int = None) -> 
     """
     Compute the best move by looking at the entire sequence of available pieces.
     """
+    board.sync_bitboard_from_grid()
     valid_pieces = [p for p in pieces if p is not None]
     if not valid_pieces:
         return None

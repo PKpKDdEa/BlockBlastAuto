@@ -22,6 +22,15 @@ class Piece:
     tray_cx: float = 0.0 
     tray_cy: float = 0.0
 
+    def __post_init__(self):
+        """Auto-build bitmask when Piece is constructed manually."""
+        if self.bitmask == 0 and self.cells:
+            mask = 0
+            for r, c in self.cells:
+                if 0 <= r < 8 and 0 <= c < 8:
+                    mask |= (1 << (r * 8 + c))
+            self.bitmask = mask
+
     @classmethod
     def from_mask(cls, piece_id: int, mask: np.ndarray, is_new: bool = False) -> 'Piece':
         """
@@ -117,7 +126,7 @@ class Board:
         board.bitboard = 0
         rows, cols = np.where(grid == 1)
         for r, c in zip(rows, cols):
-            board.bitboard |= (1 << (r * 8 + c))
+            board.bitboard |= (1 << (int(r) * 8 + int(c)))
             
         return board
     
@@ -129,6 +138,16 @@ class Board:
         new_board.combo_streak = self.combo_streak
         new_board.total_score = self.total_score
         return new_board
+
+    def sync_bitboard_from_grid(self) -> None:
+        """Recompute bitboard from numpy grid.
+
+        Useful when callers modify `grid` directly.
+        """
+        self.bitboard = 0
+        rows, cols = np.where(self.grid == 1)
+        for r, c in zip(rows, cols):
+            self.bitboard |= (1 << (int(r) * 8 + int(c)))
     
     def __str__(self) -> str:
         """ASCII representation of board."""
@@ -143,6 +162,8 @@ def is_legal(board: Board, piece: Piece, row: int, col: int) -> bool:
     """
     Check if placing a piece at position is legal.
     """
+    board.sync_bitboard_from_grid()
+
     # Quick bounds check
     if row < 0 or row + piece.height > board.rows or col < 0 or col + piece.width > board.cols:
         return False
@@ -159,6 +180,7 @@ def apply_move(board: Board, piece: Piece, row: int, col: int) -> Tuple[Board, i
     """
     Apply a move and return new board state.
     """
+    board.sync_bitboard_from_grid()
     new_board = board.copy()
     
     # Place piece on bitboard
@@ -228,6 +250,7 @@ def generate_moves(board: Board, pieces: List[Piece]) -> List[Move]:
     Returns:
         List of legal moves
     """
+    board.sync_bitboard_from_grid()
     moves = []
     
     for piece_idx, piece in enumerate(pieces):

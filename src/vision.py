@@ -1,4 +1,5 @@
 import cv2
+import math
 import numpy as np
 import time
 import json
@@ -9,16 +10,17 @@ from model import Board, Piece, Move
 
 
 class TemplateManager:
-    """Manages valid piece patterns and provides snapping/learning logic."""
+    """Manages canonical Block Blast piece templates and snapping logic."""
     
     def __init__(self, templates_path: str = "data/templates.json"):
         self.templates_path = templates_path
         self.templates: List[np.ndarray] = []
+        self.template_entries: List[Dict] = []
         self.data: Dict = {}
         self._load_templates()
         
     def _load_templates(self):
-        """Load templates from JSON into numpy arrays."""
+        """Load templates from JSON into numpy arrays and cache metadata."""
         if not os.path.exists(self.templates_path):
             os.makedirs(os.path.dirname(self.templates_path), exist_ok=True)
             with open(self.templates_path, 'w') as f:
@@ -31,171 +33,209 @@ class TemplateManager:
                 self.data = json.load(f)
                 
             self.templates = []
-            # Flatten the nested structure (categories -> names -> grids)
-            for category in self.data.values():
-                for grid_list in category.values():
-                    self.templates.append(np.array(grid_list, dtype=np.uint8))
+            self.template_entries = []
+            for category_name, category in self.data.items():
+                for name, grid_list in category.items():
+                    template = np.array(grid_list, dtype=np.uint8)
+                    self.templates.append(template)
+                    rows = int(np.any(template, axis=1).sum())
+                    cols = int(np.any(template, axis=0).sum())
+                    self.template_entries.append({
+                        "category": category_name,
+                        "name": name,
+                        "full_name": f"{category_name}/{name}",
+                        "template": template,
+                        "mass": int(np.sum(template)),
+                        "rows": rows,
+                        "cols": cols,
+                    })
         except Exception as e:
             if config.DEBUG:
                 print(f"Error loading templates: {e}")
-                
-    def match_and_validate(self, grid: np.ndarray, threshold: float = 0.80) -> Tuple[np.ndarray, float, str, Dict]:
-        """
-        v4.1: Shift-Invariant Matching (tries 3x3 internal shifts).
-        """
-        if len(self.templates) == 0:
-            return grid, 0.0, "unknown", {"is_new": True}
-            
-        best_match = None
+
+    def _score_template(self, grid: np.ndarray, template: np.ndarray) -> float:
+        """Best IoU score over valid ±2 shifts without losing mass."""
         best_score = 0.0
-        best_name = "unknown"
-        
-        # Determine current mass (number of blocks)
-        current_mass = np.sum(grid)
+        for dr in range(-2, 3):
+            for dc in range(-2, 3):
+                shifted = self.shift_grid(grid, dr, dc)
+                if np.sum(shifted) == 0:
+                    continue
+                int_sum = np.logical_and(shifted, template).sum()
+                uni_sum = np.logical_or(shifted, template).sum()
+                if uni_sum == 0:
+                    continue
+                score = int_sum / float(uni_sum)
+                if score > best_score:
+                    best_score = score
+        return best_score
+                
+    def _extract_tight_sub(self, grid: np.ndarray):
+        """Extract the tight bounding-box sub-grid and its position."""
+        filled_rows = np.where(np.any(grid, axis=1))[0]
+        filled_cols = np.where(np.any(grid, axis=0))[0]
+        if len(filled_rows) == 0 or len(filled_cols) == 0:
+            return None, 0, 0
+        r0, r1 = filled_rows[0], filled_rows[-1]
+        c0, c1 = filled_cols[0], filled_cols[-1]
+        return grid[r0:r1+1, c0:c1+1], r1 - r0 + 1, c1 - c0 + 1
+
+    def match_and_validate(
+        self,
+        grid: np.ndarray,
+        threshold: float = 0.80,
+        expected_dims: Optional[Tuple[int, int]] = None,
+    ) -> Tuple[np.ndarray, float, str, Dict]:
+        """
+        Snap a detected 5x5 grid to the closest canonical Block Blast template.
+        NEVER returns 'unknown' when blocks are detected — always finds the
+        best-matching template.
+
+        Algorithm:
+          1. Extract the tight bounding-box sub-grid from detected grid.
+          2. For EVERY template:
+             a. If bbox dimensions match: cell-by-cell comparison (aligned).
+             b. Otherwise: IoU-shift fallback (pad both to same size, try all shifts).
+          3. Rank by: cell_score > lower mass_diff.
+          4. Always return the best match.
+        """
+        if len(self.template_entries) == 0:
+            return grid, 0.0, "unknown", {"is_new": True}
+
+        current_mass = int(np.sum(grid))
         if current_mass == 0:
             return grid, 0.0, "empty", {"is_new": False}
 
-        # v4.1 Shift-Invariant Logic:
-        # We try shifting the input grid 1 slot in each direction to find best overlap
-        for dr in [-1, 0, 1]:
-            for dc in [-1, 0, 1]:
-                # Apply shift
-                shifted = self.shift_grid(grid, dr, dc)
-                if np.sum(shifted) == 0: continue
-                
-                # Compare against all templates
-                for category, pieces in self.data.items():
-                    for name, grid_list in pieces.items():
-                        template = np.array(grid_list, dtype=np.uint8)
-                        
-                        int_sum = np.logical_and(shifted, template).sum()
-                        uni_sum = np.logical_or(shifted, template).sum()
-                        if uni_sum == 0: continue
-                        
-                        score = int_sum / float(uni_sum)
-                        
-                        if score > best_score:
-                            # Mass check to avoid false positives (e.g. dot matching 2x2)
-                            if self.check_mass_mismatch(shifted, template):
-                                best_score = score
-                                best_match = template
-                                best_name = f"{category}/{name}"
-        
-        # 2. Shape Validation Rules
-        is_valid = self.validate_shape(grid, best_name, best_score)
-        
+        det_sub, det_h, det_w = self._extract_tight_sub(grid)
+        if det_sub is None:
+            return grid, 0.0, "empty", {"is_new": False}
+
+        candidates = []
+        for entry in self.template_entries:
+            t = entry["template"]
+            mass_diff = abs(current_mass - entry["mass"])
+
+            t_sub, t_h, t_w = self._extract_tight_sub(t)
+            if t_sub is None:
+                continue
+
+            bbox_match = (det_h == t_h and det_w == t_w)
+
+            if bbox_match:
+                # Direct cell-by-cell comparison (bounding boxes aligned).
+                match_cells = int(np.sum(det_sub == t_sub))
+                total_cells = det_h * det_w
+                cell_score = match_cells / float(total_cells)
+            else:
+                # IoU-shift fallback: pad both to the same dimensions
+                # and try all valid placements for best alignment.
+                big_h, big_w = max(det_h, t_h), max(det_w, t_w)
+                best_pad_score = 0.0
+                for dr in range(big_h - det_h + 1):
+                    for dc in range(big_w - det_w + 1):
+                        padded_det = np.zeros((big_h, big_w), dtype=np.uint8)
+                        padded_det[dr:dr+det_h, dc:dc+det_w] = det_sub
+                        for tr in range(big_h - t_h + 1):
+                            for tc in range(big_w - t_w + 1):
+                                padded_t = np.zeros((big_h, big_w), dtype=np.uint8)
+                                padded_t[tr:tr+t_h, tc:tc+t_w] = t_sub
+                                mc = int(np.sum(padded_det == padded_t))
+                                sc = mc / float(big_h * big_w)
+                                if sc > best_pad_score:
+                                    best_pad_score = sc
+                cell_score = best_pad_score
+
+            candidates.append({
+                **entry,
+                "score": cell_score,
+                "mass_diff": mass_diff,
+                "dim_diff": abs(det_h - t_h) + abs(det_w - t_w),
+                "bbox_match": bbox_match,
+            })
+
+        if not candidates:
+            return grid, 0.0, "unknown", {"best_score": 0.0, "is_valid": False, "category": "unknown"}
+
+        # Rank by composite score that penalises dimensional distance.
+        #
+        # Problem: raw cell_score counts empty-empty matches, so a 2x5
+        # detection (10 blocks) scores higher against 2x3 (0.60) than 1x5
+        # (0.50) because they share the same width.  But the correct match
+        # is 1x5 — the extra column is a detection artefact.
+        #
+        # Fix: subtract a penalty proportional to the sum of dimensional
+        # differences (dim_diff).  0.12 per unit of dim_diff means a
+        # template must outscore a closer-dimension alternative by >0.12
+        # per dimension to win.
+        #
+        #   2x5 vs 1x5 (dim_diff=1): 0.50 - 0.12 = 0.38
+        #   2x5 vs 2x3 (dim_diff=2): 0.60 - 0.24 = 0.36  → 1x5 wins ✓
+        #
+        # bbox_match (dim_diff=0) gets no penalty, preserving exact-match
+        # priority.
+        for c in candidates:
+            c["composite"] = c["score"] - c["dim_diff"] * 0.12
+
+        candidates.sort(key=lambda c: (
+            c["bbox_match"],        # True (1) > False (0)  — exact dims first
+            c["composite"],         # higher is better (score - dim penalty)
+            -c["mass_diff"],        # lower is better (negated)
+        ), reverse=True)
+
+        best = candidates[0]
+
+        is_valid = self.validate_shape(grid, best["full_name"], best["score"])
         match_info = {
-            "best_score": best_score,
+            "best_score": best["score"],
             "is_valid": is_valid,
-            "category": best_name.split('/')[0] if '/' in best_name else "unknown"
+            "category": best["category"],
+            "mass_diff": best["mass_diff"],
+            "dim_diff": best["dim_diff"],
+            "bbox_match": best["bbox_match"],
         }
 
-        # v5.1 Aggressive Snapping:
-        if best_match is not None:
-            if best_score >= threshold and is_valid:
-                return best_match, best_score, best_name, match_info
-            
-            # Forced Snap for exact mass matches
-            if np.sum(best_match) == current_mass and best_score >= 0.60:
-                match_info["is_forced"] = True
-                return best_match, best_score, best_name, match_info
-        
-        # v5.6: Mass-Based Fallback Snapping
-        # If no match found, find the template with the closest mass
-        closest_match = None
-        closest_name = "unknown"
-        closest_mass_diff = 999
-        closest_score = 0.0
-        for category, pieces in self.data.items():
-            for name, grid_list in pieces.items():
-                template = np.array(grid_list, dtype=np.uint8)
-                t_mass = np.sum(template)
-                mass_diff = abs(int(t_mass) - int(current_mass))
-                if mass_diff < closest_mass_diff:
-                    closest_mass_diff = mass_diff
-                    closest_match = template
-                    closest_name = f"{category}/{name}"
-                    # Calculate IoU for this closest-mass template
-                    int_sum = np.logical_and(grid, template).sum()
-                    uni_sum = np.logical_or(grid, template).sum()
-                    closest_score = int_sum / float(uni_sum) if uni_sum > 0 else 0.0
-                elif mass_diff == closest_mass_diff:
-                    # Tiebreak: pick the one with higher IoU
-                    int_sum = np.logical_and(grid, template).sum()
-                    uni_sum = np.logical_or(grid, template).sum()
-                    score = int_sum / float(uni_sum) if uni_sum > 0 else 0.0
-                    if score > closest_score:
-                        closest_match = template
-                        closest_name = f"{category}/{name}"
-                        closest_score = score
-        
-        if closest_match is not None and closest_mass_diff <= 2:
-            match_info["is_mass_fallback"] = True
-            match_info["mass_diff"] = closest_mass_diff
-            return closest_match, closest_score, closest_name, match_info
-            
-        return grid, best_score, "unknown", match_info
+        # Always return the best template match — never return 'unknown'.
+        # The score indicates confidence; downstream logic can use it.
+        return best["template"], best["score"], best["full_name"], match_info
 
     def shift_grid(self, grid: np.ndarray, dr: int, dc: int) -> np.ndarray:
-        """
-        Shifts a 5x5 grid by (dr, dc).
-        v5.1: Returns all zeros if mass is lost (shift out of bounds).
-        """
+        """Shift a 5x5 grid by (dr, dc), aborting if mass would be lost."""
         res = np.zeros_like(grid)
-        original_mass = np.sum(grid)
+        original_mass = int(np.sum(grid))
         for r in range(5):
             for c in range(5):
-                if grid[r, c] == 0: continue
+                if grid[r, c] == 0:
+                    continue
                 nr, nc = r + dr, c + dc
                 if 0 <= nr < 5 and 0 <= nc < 5:
                     res[nr, nc] = 1
-        
-        # Abort if blocks were lost
-        if np.sum(res) != original_mass:
+        if int(np.sum(res)) != original_mass:
             return np.zeros_like(grid)
-            
         return res
 
     def validate_shape(self, grid: np.ndarray, name: str, score: float) -> bool:
-        """
-        Enforce geometric rules for specific shape categories.
-        Rules (loosened in v2.2):
-        - dot: exactly 1 block
-        - line: 2-5 blocks (+/- 1 noise tolerance)
-        - square: 4 blocks (2x2) or 9 blocks (3x3) (+/- 1 noise tolerance)
-        """
-        blocks = np.sum(grid)
-        if blocks == 0: return True
+        """Validate against broad canonical Block Blast families."""
+        blocks = int(np.sum(grid))
+        if blocks == 0:
+            return True
         
         category = name.split('/')[0] if '/' in name else ""
         
         if category == "dots":
             return blocks == 1
-        elif category == "lines":
-            # Allow +/- 1 block variance for noisy detections
-            if not (1 <= blocks <= 6): return False
+        if category == "lines":
             rows = np.any(grid, axis=1)
             cols = np.any(grid, axis=0)
-            # Must be primarily elongated
-            return np.sum(rows) == 1 or np.sum(cols) == 1
-        elif category == "squares":
-            # 2x2 (4 blocks) or 3x3 (9 blocks) with +/- 1 block tolerance
-            if 3 <= blocks <= 5: # 2x2 variant
-                return True
-            if 7 <= blocks <= 10: # 3x3 variant
-                return True
-            return False
-        elif category in ["corners", "l_shapes", "t_shapes", "zs_shapes", "diag_shapes", "rectangles"]:
-            # Complex/Rectangle shapes usually have 3-6 blocks.
+            return 1 <= blocks <= 5 and (np.sum(rows) == 1 or np.sum(cols) == 1)
+        if category == "squares":
+            return blocks in {4, 9}
+        if category in {"corners", "l_shapes", "rectangles", "specials"}:
             return 2 <= blocks <= 6
             
-        return score > 0.80 # Default fallback for unknown categories
+        return score > 0.80
 
     def check_mass_mismatch(self, grid: np.ndarray, template: np.ndarray) -> bool:
-        """
-        v4.1: Ensure the candidate match has exactly the same number of blocks.
-        """
-        return np.sum(grid) == np.sum(template)
+        return int(np.sum(grid)) == int(np.sum(template))
 
     def learn_pattern(self, grid: np.ndarray):
         """[DISABLED in v2.1] - Managed templates only."""
@@ -341,11 +381,13 @@ def get_piece_vibrancy_mask(hsv_img: np.ndarray, bg_sample: Optional[np.ndarray]
     kernel = np.ones((3, 3), np.uint8)
     if not is_board:
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # No extra dilation for slots — keeps bounding box tight for accurate
+        # grid sizing.  Previous CLOSE(2)+DILATE(1) inflated the mask ~8px,
+        # causing cols/rows overestimation and every cell to appear filled.
     else:
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        
-    mask = cv2.dilate(mask, kernel, iterations=1 if not is_board else 2)
+        mask = cv2.dilate(mask, kernel, iterations=2)
     
     return mask
 
@@ -383,10 +425,12 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
     if grid_data is None:
         return None, False, 0.0, 0.0
         
-    grid_5x5, p_cx, p_cy, _d, _ax, _ay, _cols, _rows = grid_data
+    grid_5x5, p_cx, p_cy, _d, _ax, _ay, cols, rows, _bcols, _brows = grid_data
     
-    # SNAPPING: Use template manager to clean up the detection
-    final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
+    # SNAPPING: Only canonical Block Blast templates are valid outputs.
+    final_grid, score, name, match_info = template_manager.match_and_validate(
+        grid_5x5,
+    )
     
     if config.DEBUG and np.sum(final_grid) > 0:
         print(f"  Grid Detected (Match: {name}@{score:.2f})")
@@ -396,15 +440,99 @@ def detect_piece_mask(piece_region: np.ndarray) -> Tuple[Optional[np.ndarray], b
     return final_grid, match_info.get("is_new", False), p_cx, p_cy
 
 
+def _sample_grid_cells(
+    mask: np.ndarray, hsv: np.ndarray,
+    bx: int, by: int, bw: int, bh: int,
+    cols: int, rows: int, d_base: float,
+    sw: int, sh: int, debug: bool = False,
+) -> Tuple[np.ndarray, float, float, float]:
+    """
+    Sample a cols×rows cell grid centred on the bbox and determine which
+    cells are filled.  Returns (grid_5x5, d, anchor_x, anchor_y).
+    """
+    d_x = bw / float(cols) if cols > 0 else d_base
+    d_y = bh / float(rows) if rows > 0 else d_base
+    d = (d_x + d_y) / 2.0
+
+    center_x = bx + bw / 2.0
+    center_y = by + bh / 2.0
+    anchor_x = center_x - ((cols - 1) * d) / 2.0
+    anchor_y = center_y - ((rows - 1) * d) / 2.0
+
+    grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
+    start_r = (5 - rows) // 2
+    start_c = (5 - cols) // 2
+    is_elongated_line = (rows == 1 and cols >= 4) or (cols == 1 and rows >= 4)
+
+    for r_idx in range(rows):
+        for c_idx in range(cols):
+            cx_cell = int(round(anchor_x + c_idx * d))
+            cy_cell = int(round(anchor_y + r_idx * d))
+
+            offset = max(1, int(d * 0.18))
+            points_on = 0
+            sat_on = 0
+            for my in [-offset, 0, offset]:
+                for mx in [-offset, 0, offset]:
+                    px, py = cx_cell + mx, cy_cell + my
+                    if 0 <= px < sw and 0 <= py < sh:
+                        if mask[py, px] > 0:
+                            points_on += 1
+                        if hsv[py, px, 1] >= 100:
+                            sat_on += 1
+
+            half_span = max(4, int(d * 0.35))
+            rx1 = max(0, cx_cell - half_span)
+            rx2 = min(sw, cx_cell + half_span + 1)
+            ry1 = max(0, cy_cell - half_span)
+            ry2 = min(sh, cy_cell + half_span + 1)
+            roi = mask[ry1:ry2, rx1:rx2]
+            occupancy = float(np.mean(roi > 0)) if roi.size > 0 else 0.0
+            center_on = 0 <= cx_cell < sw and 0 <= cy_cell < sh and mask[cy_cell, cx_cell] > 0
+
+            mask_pass = (
+                points_on >= 5
+                or occupancy >= 0.40
+                or (center_on and points_on >= 3)
+            )
+            filled = mask_pass and sat_on >= 4
+
+            if debug:
+                status = "FILL" if filled else "SKIP"
+                print(f"    Cell({c_idx},{r_idx}) pts={points_on} occ={occupancy:.2f} sat={sat_on} mask={'Y' if mask_pass else 'N'} -> {status}")
+
+            if filled:
+                grid_5x5[start_r + r_idx, start_c + c_idx] = 1
+
+    # Elongated-line gap bridging
+    if is_elongated_line:
+        if rows == 1:
+            slice_arr = grid_5x5[start_r, start_c:start_c + cols]
+            for k in range(1, len(slice_arr) - 1):
+                if slice_arr[k] == 0 and slice_arr[k-1] == 1 and slice_arr[k+1] == 1:
+                    grid_5x5[start_r, start_c + k] = 1
+        else:
+            slice_arr = grid_5x5[start_r:start_r + rows, start_c]
+            for k in range(1, len(slice_arr) - 1):
+                if slice_arr[k] == 0 and slice_arr[k-1] == 1 and slice_arr[k+1] == 1:
+                    grid_5x5[start_r + k, start_c] = 1
+
+    return grid_5x5, d, anchor_x, anchor_y
+
+
 def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     """
     Extract a raw 5x5 binary grid from a piece slot region.
-    v3.5: Strict d/2 margin enforcement for center dots.
+    Uses multi-candidate dimension estimation: tries the primary (ceil + clamp)
+    estimate AND one-less in each dimension, picks the one with the best
+    template match score.  This fixes cases where bbox overestimate causes
+    wrong cell positions (e.g. 3-row piece estimated as 4 → cells land
+    between blocks → wrong fill pattern).
     """
     if piece_region.size == 0:
         return None
     
-    # 1. Enhanced CLAHE for v4.4 (Reduced from 4.0 to 3.0 to avoid shadow-noise)
+    # 1. Enhanced CLAHE
     lab = cv2.cvtColor(piece_region, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
@@ -426,19 +554,17 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if not contours:
         return None
         
-    # v5.4 Contour Merging: Find all pieces near the center and merge them
-    # This handles cyan pieces that are split into multiple contours.
+    # v5.4 Contour Merging
     valid_contours = []
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area < 80: continue # v5.4: lower area floor
+        if area < 80: continue
         
         M = cv2.moments(cnt)
         if M["m00"] == 0: continue
         cx_cnt = int(M["m10"] / M["m00"])
         cy_cnt = int(M["m01"] / M["m00"])
         
-        # Must be within 35% of center horizontally/vertically
         dist_x = abs(cx_cnt - sw//2) / float(sw)
         dist_y = abs(cy_cnt - sh//2) / float(sh)
         if dist_x < 0.35 and dist_y < 0.35:
@@ -447,73 +573,117 @@ def get_piece_grid(piece_region: np.ndarray) -> Optional[np.ndarray]:
     if not valid_contours:
         return None
         
-    # Merge all valid contours into one
     all_points = np.concatenate(valid_contours)
-    main_cnt = cv2.convexHull(all_points) # v5.4.1: Fix NameError by providing main_cnt
     bx, by, bw, bh = cv2.boundingRect(all_points)
     
-    # Refine BBox by checking mask density if needed (Optional for noise)
-    # But usually boundingRect on a cleaned mask is sufficient.
-    
-    # v5.6: Dynamic Pitch from Bounding Box
-    # Use TRAY_CELL_SIZE as initial estimate, then derive actual d from bbox
     d_base = float(config.TRAY_CELL_SIZE[0])
-    
-    # Estimate cols/rows from bbox using baseline pitch
-    cols = max(1, min(5, int(round(bw / d_base))))
-    rows = max(1, min(5, int(round(bh / d_base))))
-    
-    # v5.6: Compute actual pitch directly from bounding box
-    # This makes detection immune to TRAY_CELL_SIZE calibration errors
-    d_x = bw / float(cols) if cols > 0 else d_base
-    d_y = bh / float(rows) if rows > 0 else d_base
-    d = (d_x + d_y) / 2.0
-        
+
+    # --- Multi-candidate dimension estimation ---
+    # Primary estimate: ceil() to oversample, then clamp if pitch too small.
+    max_cols = max(1, min(5, math.ceil(bw / d_base)))
+    max_rows = max(1, min(5, math.ceil(bh / d_base)))
+    min_d = d_base * 0.90
+    while max_cols > 1 and bw / float(max_cols) < min_d:
+        max_cols -= 1
+    while max_rows > 1 and bh / float(max_rows) < min_d:
+        max_rows -= 1
+
+    # Generate candidates: primary + reduced in each dimension + both reduced.
+    # When rows and/or cols is overestimated, a reduced candidate will
+    # produce correct cell positions and a better template match.
+    dim_candidates_set = {(max_cols, max_rows)}
+    if max_rows > 1:
+        dim_candidates_set.add((max_cols, max_rows - 1))
+    if max_cols > 1:
+        dim_candidates_set.add((max_cols - 1, max_rows))
+    if max_cols > 1 and max_rows > 1:
+        dim_candidates_set.add((max_cols - 1, max_rows - 1))
+    dim_candidates = sorted(dim_candidates_set, reverse=True)
+
+    # Estimate expected block count from mask area.
+    # Used to penalize candidates that detect far fewer blocks than expected.
+    mask_area = float(cv2.countNonZero(mask[by:by+bh, bx:bx+bw]))
+    cell_area = d_base * d_base
+    expected_blocks = max(1.0, mask_area / cell_area)
+
+    best_grid = None
+    best_composite = -1
+    best_meta = None
+
+    for try_cols, try_rows in dim_candidates:
+        grid, d, ax, ay = _sample_grid_cells(
+            mask, hsv, bx, by, bw, bh,
+            try_cols, try_rows, d_base, sw, sh, debug=False,
+        )
+        n_blocks = int(np.sum(grid))
+        if n_blocks == 0:
+            continue
+        _, score, name, _ = template_manager.match_and_validate(grid)
+
+        # Composite score: template match quality × sqrt(block coverage).
+        #
+        # block_ratio = detected_blocks / expected_blocks, capped at 1.
+        # We use sqrt() to soften the penalty.  The mask area overestimates
+        # expected_blocks due to morphological fill (CLOSE fills gaps between
+        # adjacent blocks), so a correct candidate with fewer-than-expected
+        # blocks shouldn't be penalized too harshly.
+        #
+        # Linear (old, broken):
+        #   (3,3) 5 blocks, expected≈7: ratio=0.68, comp = 1.00 × 0.68 = 0.68
+        #   (3,4) 8 blocks:             ratio=1.00, comp = 0.75 × 1.00 = 0.75 ← wrong wins
+        #
+        # Sqrt (new, fixed):
+        #   (3,3) 5 blocks: ratio=0.68, sqrt=0.82, comp = 1.00 × 0.82 = 0.82 ← correct wins
+        #   (3,4) 8 blocks: ratio=1.00, sqrt=1.00, comp = 0.75 × 1.00 = 0.75
+        #
+        # But a 3-block candidate capturing half the piece still loses:
+        #   (2,3) 3 blocks, expected≈5: ratio=0.60, sqrt=0.77, comp = 1.00 × 0.77 = 0.77
+        #   (3,3) 5 blocks:             ratio=1.00, sqrt=1.00, comp = 0.90 × 1.00 = 0.90 ← correct wins
+        block_ratio = min(1.0, n_blocks / expected_blocks)
+        composite = score * math.sqrt(block_ratio)
+
+        if config.DEBUG:
+            print(f"  Candidate({try_cols}x{try_rows}): blocks={n_blocks}, match={name}@{score:.2f}, ratio={block_ratio:.2f}, composite={composite:.2f}")
+
+        if composite > best_composite:
+            best_composite = composite
+            best_grid = grid.copy()
+            best_meta = (d, ax, ay, try_cols, try_rows)
+
+    if best_grid is None or best_meta is None:
+        return None
+
+    grid_5x5 = best_grid
+    d, anchor_x, anchor_y, cols, rows = best_meta
+
+    # Re-run with debug output for the winning candidate
     if config.DEBUG:
-        print(f"  Scale: BBox({bw}x{bh}) -> Inferred({cols}x{rows}) d={d:.1f} (base={d_base})")
-    
-    # Center-based anchoring
-    center_x = bx + bw / 2.0
-    center_y = by + bh / 2.0
-    anchor_x = center_x - ((cols - 1) * d) / 2.0
-    anchor_y = center_y - ((rows - 1) * d) / 2.0
-    
-    grid_5x5 = np.zeros((5, 5), dtype=np.uint8)
-    start_r = (5 - rows) // 2
-    start_c = (5 - cols) // 2
-    
-    margin = d / 2.0
-    
-    for r_idx in range(rows):
-        for c_idx in range(cols):
-            cx_cell = int(round(anchor_x + c_idx * d))
-            cy_cell = int(round(anchor_y + r_idx * d))
-            
-            # Sub-grid consensus (9 dots)
-            offset = int(d * 0.18)
-            points_on = 0
-            
-            for my in [-offset, 0, offset]:
-                for mx in [-offset, 0, offset]:
-                    px, py = cx_cell + mx, cy_cell + my
-                    if 0 <= px < sw and 0 <= py < sh:
-                        dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(px), float(py)), True)
-                        if mask[py, px] > 0 and dist_from_edge >= margin * 0.35:
-                            points_on += 1
-            
-            if points_on >= 4:
-                grid_5x5[start_r + r_idx, start_c + c_idx] = 1
-                
+        print(f"  Winner: ({cols}x{rows}) composite={best_composite:.2f}")
+        _sample_grid_cells(
+            mask, hsv, bx, by, bw, bh,
+            cols, rows, d_base, sw, sh, debug=True,
+        )
+
     piece_cx = bx + bw / 2.0
     piece_cy = by + bh / 2.0
+    
+    # Recompute actual dimensions from the filled cells
+    filled_rows_idx = np.where(np.any(grid_5x5, axis=1))[0]
+    filled_cols_idx = np.where(np.any(grid_5x5, axis=0))[0]
+    if len(filled_rows_idx) > 0 and len(filled_cols_idx) > 0:
+        actual_rows = int(filled_rows_idx[-1] - filled_rows_idx[0] + 1)
+        actual_cols = int(filled_cols_idx[-1] - filled_cols_idx[0] + 1)
+    else:
+        actual_rows = rows
+        actual_cols = cols
     
     if config.DEBUG:
         block_count = np.sum(grid_5x5)
         if block_count > 0:
-            print(f"  [v5.6] Pitch: {d:.1f}px, Blocks: {block_count}")
+            print(f"  [v6] Pitch: {d:.1f}px, Blocks: {block_count}, Grid: {actual_cols}x{actual_rows} (est: {cols}x{rows})")
             
-    # v5.6: Return extended metadata for visualization reuse
-    return grid_5x5, piece_cx, piece_cy, d, anchor_x, anchor_y, cols, rows
+    # Return: grid, center, pitch, anchor, actual dims, bbox-estimated dims
+    return grid_5x5, piece_cx, piece_cy, d, anchor_x, anchor_y, actual_cols, actual_rows, cols, rows
 
 
 def load_piece_templates() -> dict:
@@ -583,7 +753,7 @@ def wait_for_board_stable(capture, timeout_s: float = 3.0):
     return False
 
 
-def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) -> np.ndarray:
+def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece], scan_piece_slots: bool = True) -> np.ndarray:
     """
     Create visualization of detected board and pieces.
     
@@ -619,10 +789,18 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
             color = (0, 0, 255) if board.grid[row, col] == 1 else (100, 100, 100)
             cv2.circle(vis, (cx, cy), 3, color, -1)
     
-    # Draw piece slots and their internal relative grids (v5.6: Unified with get_piece_grid)
+    # Draw piece slots and their internal relative grids.
+    # When scan_piece_slots is False, avoid expensive re-analysis and just draw
+    # the cached slot boxes/labels so the UI remains live without nonstop scanning.
     for slot_idx, slot in enumerate(config.PIECE_SLOTS):
         cv2.rectangle(vis, (slot.x, slot.y), (slot.x + slot.width, slot.y + slot.height), (255, 0, 0), 1)
-        
+        if not scan_piece_slots:
+            if pieces and slot_idx < len(pieces) and pieces[slot_idx] is not None:
+                piece = pieces[slot_idx]
+                cv2.putText(vis, f"{piece.width}x{piece.height}", (slot.x + 6, slot.y + 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            continue
+
         piece_region = frame[slot.y:slot.y+slot.height, slot.x:slot.x+slot.width]
         if piece_region.size == 0: continue
         
@@ -630,58 +808,42 @@ def visualize_detection(frame: np.ndarray, board: Board, pieces: List[Piece]) ->
         grid_data = get_piece_grid(piece_region)
         if grid_data is None: continue
         
-        grid_5x5, _, _, d, anchor_x, anchor_y, cols, rows = grid_data
+        grid_5x5, _, _, d, anchor_x, anchor_y, actual_cols, actual_rows, bbox_cols, bbox_rows = grid_data
         
-        # Reconstruct mask and contour for dot visualization
-        lab = cv2.cvtColor(piece_region, cv2.COLOR_BGR2LAB)
-        l_ch, a_ch, b_ch = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
-        cl = clahe.apply(l_ch)
-        limg = cv2.merge((cl, a_ch, b_ch))
-        piece_enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
-        hsv = cv2.cvtColor(piece_enhanced, cv2.COLOR_BGR2HSV)
-        h, w = hsv.shape[:2]
-        corners = [hsv[1:6, 1:6], hsv[1:6, w-6:w-1], hsv[h-6:h-1, 1:6], hsv[h-6:h-1, w-6:w-1]]
-        bg_sample = np.mean(np.concatenate([c.reshape(-1, 3) for c in corners]), axis=0).reshape(1, 3)
-        mask = get_piece_vibrancy_mask(hsv, bg_sample=bg_sample)
+        # anchor_x/y is the center of the (start_c, start_r) cell in grid_5x5,
+        # where start_r/c come from the bbox-estimated dims.
+        start_r = (5 - bbox_rows) // 2
+        start_c = (5 - bbox_cols) // 2
         
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours: continue
-        valid_contours = [cnt for cnt in contours if cv2.contourArea(cnt) >= 80]
-        if not valid_contours: continue
-        all_points = np.concatenate(valid_contours)
-        main_cnt = cv2.convexHull(all_points)
-        bx, by, bw, bh = cv2.boundingRect(all_points)
+        # Draw dots for all cells within the filled extent
+        filled_r = np.where(np.any(grid_5x5, axis=1))[0]
+        filled_c = np.where(np.any(grid_5x5, axis=0))[0]
+        if len(filled_r) == 0:
+            continue
         
-        # Draw the "White Bracket" (Tight Bounding Box)
-        cv2.rectangle(vis, (slot.x + bx, slot.y + by), (slot.x + bx + bw, slot.y + by + bh), (255, 255, 255), 1)
+        r_min, r_max = filled_r[0], filled_r[-1]
+        c_min, c_max = filled_c[0], filled_c[-1]
         
-        margin = d / 2.0
-
-        # Draw the inferred grid samples using the EXACT same d and anchor as get_piece_grid
-        for r_idx in range(rows):
-            for c_idx in range(cols):
-                cx_cell = int(round(anchor_x + c_idx * d))
-                cy_cell = int(round(anchor_y + r_idx * d))
-                offset = int(d * 0.18)
+        block_count = 0
+        for r_idx in range(r_min, r_max + 1):
+            for c_idx in range(c_min, c_max + 1):
+                # Map grid_5x5 (r_idx, c_idx) -> pixel position in piece_region
+                px = int(anchor_x + (c_idx - start_c) * d)
+                py = int(anchor_y + (r_idx - start_r) * d)
+                # Convert from piece_region coords to frame coords
+                abs_x = slot.x + px
+                abs_y = slot.y + py
                 
-                points_on = 0
-                for my in [-offset, 0, offset]:
-                    for mx in [-offset, 0, offset]:
-                        px, py = slot.x + cx_cell + mx, slot.y + cy_cell + my
-                        if 0 <= cx_cell + mx < piece_region.shape[1] and 0 <= cy_cell + my < piece_region.shape[0]:
-                            dist_from_edge = cv2.pointPolygonTest(main_cnt, (float(cx_cell+mx), float(cy_cell+my)), True)
-                            is_on = mask[cy_cell + my, cx_cell + mx] > 0 and dist_from_edge >= margin * 0.35
-                            
-                            dot_color = (0, 0, 255) if is_on else (60, 60, 60)
-                            cv2.circle(vis, (px, py), 1, dot_color, -1)
-                            if is_on: points_on += 1
-                
-                # Result Dot
-                if points_on >= 4:
-                    cv2.circle(vis, (slot.x + cx_cell, slot.y + cy_cell), 3, (0, 255, 0), -1)
-                elif points_on > 0:
-                    cv2.circle(vis, (slot.x + cx_cell, slot.y + cy_cell), 2, (0, 0, 255), -1)
+                if grid_5x5[r_idx, c_idx]:
+                    cv2.circle(vis, (abs_x, abs_y), 5, (0, 255, 0), -1)  # green filled
+                    block_count += 1
+                else:
+                    cv2.circle(vis, (abs_x, abs_y), 3, (100, 100, 100), -1)  # gray empty
+        
+        # Label with actual dimensions
+        label = f"{actual_cols}x{actual_rows} ({block_count})"
+        cv2.putText(vis, label, (slot.x + 6, slot.y + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
     return vis
 
@@ -715,8 +877,11 @@ def visualize_piece_analysis(frame: np.ndarray, pieces: List[Piece]) -> np.ndarr
         # Get identification details (v5.6: Correct 8-tuple unpacking)
         grid_data = get_piece_grid(piece_region)
         if grid_data is not None:
-            grid_5x5, _, _, _d, _ax, _ay, _cols, _rows = grid_data
-            final_grid, score, name, match_info = template_manager.match_and_validate(grid_5x5)
+            grid_5x5, _, _, _d, _ax, _ay, cols, rows, _bcols, _brows = grid_data
+            final_grid, score, name, match_info = template_manager.match_and_validate(
+                grid_5x5,
+                expected_dims=(rows, cols),
+            )
             
             # Label
             label = f"{name}"

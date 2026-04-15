@@ -12,288 +12,200 @@
     },
     {
         "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.81513909977731,
-            "WEIGHT_HOLES_PENALTY": -14.613728397711872,
-            "WEIGHT_BUMPINESS": -0.49914727121496116,
-            "WEIGHT_NEAR_COMPLETE": 3.0170278448030086,
-            "WEIGHT_STREAK_BONUS": 21.450372506942216
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.05041194070816,
-            "WEIGHT_HOLES_PENALTY": -16.059291674125028,
-            "WEIGHT_BUMPINESS": -0.47807122464355833,
-            "WEIGHT_NEAR_COMPLETE": 2.856166105798646,
-            "WEIGHT_STREAK_BONUS": 20.06099826288896
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.855178498138442,
-            "WEIGHT_HOLES_PENALTY": -15.060899415295138,
-            "WEIGHT_BUMPINESS": -0.49421482471543676,
-            "WEIGHT_NEAR_COMPLETE": 3.296321319170281,
-            "WEIGHT_STREAK_BONUS": 18.527828443949808
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.1178556170629887,
-            "WEIGHT_HOLES_PENALTY": -13.874308394985707,
-            "WEIGHT_BUMPINESS": -0.5148691126133866,
-            "WEIGHT_NEAR_COMPLETE": 2.7871609827333956,
-            "WEIGHT_STREAK_BONUS": 18.70605175046738
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.9271304176365507,
-            "WEIGHT_HOLES_PENALTY": -15.24813588469489,
-            "WEIGHT_BUMPINESS": -0.47449032357328846,
-            "WEIGHT_NEAR_COMPLETE": 3.0105621052508043,
-            "WEIGHT_STREAK_BONUS": 21.706891824594422
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.058789507038751,
-            "WEIGHT_HOLES_PENALTY": -13.533797817860039,
-            "WEIGHT_BUMPINESS": -0.5412809708305231,
-            "WEIGHT_NEAR_COMPLETE": 2.8850329646188264,
-            "WEIGHT_STREAK_BONUS": 19.293777837563525
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.001530242391807,
-            "WEIGHT_HOLES_PENALTY": -13.855969363003389,
-            "WEIGHT_BUMPINESS": -0.5082986329772462,
-            "WEIGHT_NEAR_COMPLETE": 2.8280974066626534,
-            "WEIGHT_STREAK_BONUS": 18.87583768789351
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8405565326232967,
-            "WEIGHT_HOLES_PENALTY": -14.501711817676737,
-            "WEIGHT_BUMPINESS": -0.5068792118361186,
-            "WEIGHT_NEAR_COMPLETE": 3.1876821724986444,
-            "WEIGHT_STREAK_BONUS": 18.416642032898658
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8261370095305025,
-            "WEIGHT_HOLES_PENALTY": -14.992562305416538,
-            "WEIGHT_BUMPINESS": -0.48076206343326944,
-            "WEIGHT_NEAR_COMPLETE": 2.8410094760686544,
-            "WEIGHT_STREAK_BONUS": 21.77173408715596
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8108606991103835,
-            "WEIGHT_HOLES_PENALTY": -14.09184974603253,
-            "WEIGHT_BUMPINESS": -0.48416923787745325,
-            "WEIGHT_NEAR_COMPLETE": 2.8860950022928114,
-            "WEIGHT_STREAK_BONUS": 19.301724443517465
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8338392763581546,
-            "WEIGHT_HOLES_PENALTY": -15.89079509219324,
-            "WEIGHT_BUMPINESS": -0.49961227311564976,
-            "WEIGHT_NEAR_COMPLETE": 2.712992966829159,
-            "WEIGHT_STREAK_BONUS": 19.31448780110997
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.093546340019359,
-            "WEIGHT_HOLES_PENALTY": -13.888322440784455,
-            "WEIGHT_BUMPINESS": -0.4723574559897396,
-            "WEIGHT_NEAR_COMPLETE": 3.2711269312604108,
-            "WEIGHT_STREAK_BONUS": 18.627165168036782
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8867808472564715,
-            "WEIGHT_HOLES_PENALTY": -16.475123774527024,
-            "WEIGHT_BUMPINESS": -0.4846006260360093,
-            "WEIGHT_NEAR_COMPLETE": 3.151107074249437,
-            "WEIGHT_STREAK_BONUS": 21.191920946704226
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8280150452093067,
-            "WEIGHT_HOLES_PENALTY": -16.43981133748002,
-            "WEIGHT_BUMPINESS": -0.5024039866429955,
-            "WEIGHT_NEAR_COMPLETE": 2.7959414745972935,
-            "WEIGHT_STREAK_BONUS": 21.60686784854726
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.1531809404535234,
-            "WEIGHT_HOLES_PENALTY": -13.782013382889923,
-            "WEIGHT_BUMPINESS": -0.465040507372244,
-            "WEIGHT_NEAR_COMPLETE": 2.757832525027613,
-            "WEIGHT_STREAK_BONUS": 21.15350193252487
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.1526781466470535,
-            "WEIGHT_HOLES_PENALTY": -13.607112652824533,
-            "WEIGHT_BUMPINESS": -0.5402112231925961,
-            "WEIGHT_NEAR_COMPLETE": 2.745247027333316,
-            "WEIGHT_STREAK_BONUS": 18.202624346017156
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.9407929528389678,
-            "WEIGHT_HOLES_PENALTY": -14.242298473393355,
-            "WEIGHT_BUMPINESS": -0.46887325367170524,
-            "WEIGHT_NEAR_COMPLETE": 2.81300828951395,
-            "WEIGHT_STREAK_BONUS": 19.909633754733427
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.877892609048864,
-            "WEIGHT_HOLES_PENALTY": -15.854333750921029,
-            "WEIGHT_BUMPINESS": -0.5407746849232401,
-            "WEIGHT_NEAR_COMPLETE": 3.1206035318220495,
-            "WEIGHT_STREAK_BONUS": 21.50945529447178
-        }
-    },
-    {
-        "score": 0,
-        "moves": 0,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.0040812202639677,
-            "WEIGHT_HOLES_PENALTY": -13.640264556143391,
-            "WEIGHT_BUMPINESS": -0.47020049109215944,
-            "WEIGHT_NEAR_COMPLETE": 3.1931395741873114,
-            "WEIGHT_STREAK_BONUS": 18.112857273473566
-        }
-    },
-    {
-        "score": 0,
-        "moves": 34,
-        "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8966481897790735,
-            "WEIGHT_HOLES_PENALTY": -15.143203660649792,
-            "WEIGHT_BUMPINESS": -0.5047844141004403,
-            "WEIGHT_NEAR_COMPLETE": 3.1933641965498234,
-            "WEIGHT_STREAK_BONUS": 18.059745727725634
-        }
-    },
-    {
-        "score": 0,
         "moves": 13,
         "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.001017244787725,
-            "WEIGHT_HOLES_PENALTY": -16.41995367837371,
-            "WEIGHT_BUMPINESS": -0.5475605721040727,
-            "WEIGHT_NEAR_COMPLETE": 3.1498160777186754,
-            "WEIGHT_STREAK_BONUS": 20.46594839046129
+            "WEIGHT_EMPTY_CELLS": 1.8947008508837515,
+            "WEIGHT_HOLES_PENALTY": -14.858993348110626,
+            "WEIGHT_BUMPINESS": -0.5114806880156091,
+            "WEIGHT_NEAR_COMPLETE": 3.079830171947521,
+            "WEIGHT_STREAK_BONUS": 19.309315651503194
+        }
+    },
+    {
+        "score": 0,
+        "moves": 3,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.876102888822663,
+            "WEIGHT_HOLES_PENALTY": -14.628285588583275,
+            "WEIGHT_BUMPINESS": -0.49059608212767836,
+            "WEIGHT_NEAR_COMPLETE": 2.7477850899947396,
+            "WEIGHT_STREAK_BONUS": 21.66646063439089
+        }
+    },
+    {
+        "score": 0,
+        "moves": 2,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9046945871920764,
+            "WEIGHT_HOLES_PENALTY": -13.851306662029973,
+            "WEIGHT_BUMPINESS": -0.5060073255975654,
+            "WEIGHT_NEAR_COMPLETE": 2.792720060615143,
+            "WEIGHT_STREAK_BONUS": 19.81177633087836
+        }
+    },
+    {
+        "score": 0,
+        "moves": 3,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9332464613759905,
+            "WEIGHT_HOLES_PENALTY": -15.056767148921182,
+            "WEIGHT_BUMPINESS": -0.45504642129093953,
+            "WEIGHT_NEAR_COMPLETE": 3.1010761147724697,
+            "WEIGHT_STREAK_BONUS": 19.83194533531778
         }
     },
     {
         "score": 0,
         "moves": 0,
         "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.993254209587128,
-            "WEIGHT_HOLES_PENALTY": -15.888463542913962,
-            "WEIGHT_BUMPINESS": -0.5447395878821094,
-            "WEIGHT_NEAR_COMPLETE": 2.9334381624817643,
-            "WEIGHT_STREAK_BONUS": 18.2671647098008
+            "WEIGHT_EMPTY_CELLS": 1.9000768787439686,
+            "WEIGHT_HOLES_PENALTY": -13.555865559818612,
+            "WEIGHT_BUMPINESS": -0.5195760347699817,
+            "WEIGHT_NEAR_COMPLETE": 2.9009382056446458,
+            "WEIGHT_STREAK_BONUS": 18.58131539518113
         }
     },
     {
         "score": 0,
-        "moves": 6,
+        "moves": 0,
         "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.1739030002772304,
-            "WEIGHT_HOLES_PENALTY": -16.428911463700075,
-            "WEIGHT_BUMPINESS": -0.5123424437672399,
-            "WEIGHT_NEAR_COMPLETE": 3.110077776589727,
-            "WEIGHT_STREAK_BONUS": 21.65060020237498
+            "WEIGHT_EMPTY_CELLS": 2.0358314652740286,
+            "WEIGHT_HOLES_PENALTY": -15.758669105352554,
+            "WEIGHT_BUMPINESS": -0.5396120864817522,
+            "WEIGHT_NEAR_COMPLETE": 3.2962806032601115,
+            "WEIGHT_STREAK_BONUS": 21.626251623896927
         }
     },
     {
         "score": 0,
-        "moves": 4,
+        "moves": 7,
         "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.810671939740652,
-            "WEIGHT_HOLES_PENALTY": -15.358202386600592,
-            "WEIGHT_BUMPINESS": -0.5083639617664325,
-            "WEIGHT_NEAR_COMPLETE": 2.9773042590582772,
-            "WEIGHT_STREAK_BONUS": 18.637666534404804
+            "WEIGHT_EMPTY_CELLS": 1.868339283554298,
+            "WEIGHT_HOLES_PENALTY": -13.550808479030175,
+            "WEIGHT_BUMPINESS": -0.5220578682388755,
+            "WEIGHT_NEAR_COMPLETE": 2.7179317730722934,
+            "WEIGHT_STREAK_BONUS": 18.77091502197857
         }
     },
     {
         "score": 0,
-        "moves": 37,
+        "moves": 3,
         "weights": {
-            "WEIGHT_EMPTY_CELLS": 1.8084261313167072,
-            "WEIGHT_HOLES_PENALTY": -14.361217102676399,
-            "WEIGHT_BUMPINESS": -0.5389052025301313,
-            "WEIGHT_NEAR_COMPLETE": 2.959884328138075,
-            "WEIGHT_STREAK_BONUS": 20.293052360565262
+            "WEIGHT_EMPTY_CELLS": 1.9164777120459968,
+            "WEIGHT_HOLES_PENALTY": -15.17306869368552,
+            "WEIGHT_BUMPINESS": -0.49215397914831455,
+            "WEIGHT_NEAR_COMPLETE": 3.1111534391526012,
+            "WEIGHT_STREAK_BONUS": 21.74515121077811
         }
     },
     {
         "score": 0,
-        "moves": 42,
+        "moves": 3,
         "weights": {
-            "WEIGHT_EMPTY_CELLS": 2.145258566612788,
-            "WEIGHT_HOLES_PENALTY": -13.658294208495036,
-            "WEIGHT_BUMPINESS": -0.5060607472374008,
-            "WEIGHT_NEAR_COMPLETE": 2.716608927062851,
-            "WEIGHT_STREAK_BONUS": 18.610319576457258
+            "WEIGHT_EMPTY_CELLS": 2.0192556140366253,
+            "WEIGHT_HOLES_PENALTY": -15.564685646161038,
+            "WEIGHT_BUMPINESS": -0.5048601935777088,
+            "WEIGHT_NEAR_COMPLETE": 3.275523585197221,
+            "WEIGHT_STREAK_BONUS": 20.912301129328206
+        }
+    },
+    {
+        "score": 0,
+        "moves": 0,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9718089529317484,
+            "WEIGHT_HOLES_PENALTY": -14.479491913696405,
+            "WEIGHT_BUMPINESS": -0.5376684442148838,
+            "WEIGHT_NEAR_COMPLETE": 3.200258181924055,
+            "WEIGHT_STREAK_BONUS": 20.184229492071914
+        }
+    },
+    {
+        "score": 0,
+        "moves": 32,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.8777698613137233,
+            "WEIGHT_HOLES_PENALTY": -15.637014325601498,
+            "WEIGHT_BUMPINESS": -0.5162451364186821,
+            "WEIGHT_NEAR_COMPLETE": 3.2149782444866846,
+            "WEIGHT_STREAK_BONUS": 18.59540306061913
+        }
+    },
+    {
+        "score": 0,
+        "moves": 3,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 2.038161339807335,
+            "WEIGHT_HOLES_PENALTY": -13.999744728786487,
+            "WEIGHT_BUMPINESS": -0.4877988065460128,
+            "WEIGHT_NEAR_COMPLETE": 3.252002496998286,
+            "WEIGHT_STREAK_BONUS": 19.403444999283685
+        }
+    },
+    {
+        "score": 0,
+        "moves": 17,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9384462839636525,
+            "WEIGHT_HOLES_PENALTY": -14.023053001107243,
+            "WEIGHT_BUMPINESS": -0.5396817381034703,
+            "WEIGHT_NEAR_COMPLETE": 3.1953379534303856,
+            "WEIGHT_STREAK_BONUS": 19.474923237403083
+        }
+    },
+    {
+        "score": 0,
+        "moves": 5,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9217298100105806,
+            "WEIGHT_HOLES_PENALTY": -14.409238975722172,
+            "WEIGHT_BUMPINESS": -0.46479917061040893,
+            "WEIGHT_NEAR_COMPLETE": 2.768549678978688,
+            "WEIGHT_STREAK_BONUS": 20.760922295881205
+        }
+    },
+    {
+        "score": 0,
+        "moves": 3,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 2.0308933768994097,
+            "WEIGHT_HOLES_PENALTY": -14.742518449051179,
+            "WEIGHT_BUMPINESS": -0.5302499834308352,
+            "WEIGHT_NEAR_COMPLETE": 2.896042297446235,
+            "WEIGHT_STREAK_BONUS": 21.90319361385165
+        }
+    },
+    {
+        "score": 0,
+        "moves": 21,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.8084135110118664,
+            "WEIGHT_HOLES_PENALTY": -15.451413210191854,
+            "WEIGHT_BUMPINESS": -0.5409582516276907,
+            "WEIGHT_NEAR_COMPLETE": 3.031068629084844,
+            "WEIGHT_STREAK_BONUS": 19.68294299863744
+        }
+    },
+    {
+        "score": 0,
+        "moves": 3,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.9154556671461138,
+            "WEIGHT_HOLES_PENALTY": -15.594727868504044,
+            "WEIGHT_BUMPINESS": -0.4506748823579192,
+            "WEIGHT_NEAR_COMPLETE": 2.733746251916594,
+            "WEIGHT_STREAK_BONUS": 19.36719898265903
+        }
+    },
+    {
+        "score": 0,
+        "moves": 2,
+        "weights": {
+            "WEIGHT_EMPTY_CELLS": 1.907583644731849,
+            "WEIGHT_HOLES_PENALTY": -13.508204442332364,
+            "WEIGHT_BUMPINESS": -0.46863242183452114,
+            "WEIGHT_NEAR_COMPLETE": 2.7935246700784586,
+            "WEIGHT_STREAK_BONUS": 21.61769506938593
         }
     }
 ]

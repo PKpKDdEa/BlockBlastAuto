@@ -7,7 +7,7 @@ from window_capture import WindowCapture
 from vision import read_board, read_pieces, visualize_detection, visualize_piece_analysis, draw_pause_status
 from model import Board
 from solver import best_move
-from controller import drag_piece
+from controller import drag_piece, ensure_control_backend_ready
 from config import config
 import keyboard
 
@@ -38,12 +38,17 @@ def main():
         print("ERROR: Could not find MuMu window!")
         return
     
-    print(f"✓ Found window: {capture.window_title}")
-    print(f"✓ Tray Calibration: {config.TRAY_CELL_SIZE[0]}px Pitch")
+    print(f"[OK] Found window: {capture.window_title}")
+    print(f"[OK] Tray Calibration: {config.TRAY_CELL_SIZE[0]}px Pitch")
+    ensure_control_backend_ready()
     
     # Simulation state
     sim_board = Board(config.GRID_ROWS, config.GRID_COLS)
     move_count = 0
+
+    # Detection throttle: only re-run board/piece CV every 5 seconds unless a
+    # move has just been made. This prevents nonstop rescanning on identical frames.
+    BOARD_SCAN_INTERVAL = 5.0
     
     print("\nStarting automation loop...")
     print(f"Controls: Press [{config.HOTKEY_PAUSE.upper()}] to Pause/Resume, [{config.HOTKEY_AUTO_TOGGLE.upper()}] to toggle Auto-Play.")
@@ -53,7 +58,12 @@ def main():
         "paused": False,
         "auto_play": config.AUTO_PLAY,
         "pieces_last_seen": None,
-        "diag_frame": None
+        "diag_frame": None,
+        # Board scan throttle
+        "last_board_scan_time": 0.0,
+        "cached_board": None,
+        "cached_pieces": None,
+        "refresh_detection": True,
     }
     
     def on_toggle_pause():
@@ -98,12 +108,33 @@ def main():
             if frame is None:
                 continue
                 
-            # Read actual board and pieces
-            board = read_board(frame)
-            pieces = read_pieces(frame)
+            # Re-run expensive CV only on the throttle interval or after a move.
+            now = time.time()
+            should_refresh_detection = (
+                state["refresh_detection"]
+                or state["cached_board"] is None
+                or state["cached_pieces"] is None
+                or (now - state["last_board_scan_time"]) >= BOARD_SCAN_INTERVAL
+            )
+
+            if should_refresh_detection:
+                board = read_board(frame)
+                pieces = read_pieces(frame)
+                state["cached_board"] = board
+                state["cached_pieces"] = pieces
+                state["last_board_scan_time"] = now
+                state["refresh_detection"] = False
+                if config.DEBUG:
+                    print(f"[BOARD] Rescanned at t={now:.1f}")
+            else:
+                board = state["cached_board"]
+                pieces = state["cached_pieces"]
             
             # Show Live Vision (Always active)
-            vis = visualize_detection(frame, board, pieces)
+            # In OBSERVE mode: always show detailed scanning visualization (scan_piece_slots=True)
+            # In AUTO-PLAY mode: only show detailed scans when actually refreshing detection
+            show_detailed_scan = not state["auto_play"] or should_refresh_detection
+            vis = visualize_detection(frame, board, pieces, scan_piece_slots=show_detailed_scan)
             draw_pause_status(vis, state["paused"])
             # Indicate current mode
             mode_text = "AUTO-PLAY" if state["auto_play"] else "OBSERVING ONLY"
@@ -111,11 +142,17 @@ def main():
             cv2.putText(vis, mode_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.8, mode_color, 2)
             cv2.imshow("Bot Vision", vis)
             
-            # Show Stable Piece Analysis (Update only on turn change)
+            # Show Stable Piece Analysis (Update only on turn change, or always in observe mode)
             has_pieces = any(p is not None for p in pieces)
-            if state["pieces_last_seen"] is None or pieces != state["pieces_last_seen"]:
+            # In OBSERVE mode, always show Piece Analysis for debug without forcing a rescan
+            # In AUTO-PLAY mode, update only when detection refreshes
+            if state["auto_play"]:
+                if should_refresh_detection and (state["pieces_last_seen"] is None or pieces != state["pieces_last_seen"]):
+                    state["diag_frame"] = visualize_piece_analysis(frame, pieces)
+                    state["pieces_last_seen"] = pieces
+            else:
+                # In observe mode: always show the layout (using current frame & cached pieces, no rescan)
                 state["diag_frame"] = visualize_piece_analysis(frame, pieces)
-                state["pieces_last_seen"] = pieces
             
             if state["diag_frame"] is not None:
                 cv2.imshow("Piece Analysis", state["diag_frame"])
@@ -256,6 +293,10 @@ def main():
             from vision import wait_for_board_stable
             print("Done. Waiting for animation...")
             wait_for_board_stable(capture)
+
+            # Force a fresh CV pass on the next loop after a successful/attempted move.
+            state["last_board_scan_time"] = 0.0
+            state["refresh_detection"] = True
             
     except KeyboardInterrupt:
         print("\nBot stopped by user.")

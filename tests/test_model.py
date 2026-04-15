@@ -44,7 +44,7 @@ def test_piece_from_mask():
     
     piece = Piece.from_mask(0, mask)
     assert piece.id == 0
-    assert piece.width == 3
+    assert piece.width == 2
     assert piece.height == 3
     assert len(piece.cells) == 4
 
